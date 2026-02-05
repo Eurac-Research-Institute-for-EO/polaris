@@ -7,7 +7,7 @@ on:
     paths:
       - 'docs/wiki/**'
       - 'mkdocs.yml'
-      - '.github/workflows/docs/deploy_docs.yaml'
+      - '.github/workflows/deploy_docs.yaml'
   pull_request:
     branches:
       - main
@@ -15,7 +15,7 @@ on:
     paths:
       - 'docs/wiki/**'
       - 'mkdocs.yml'
-      - '.github/workflows/docs/deploy_docs.yaml'
+      - '.github/workflows/deploy_docs.yaml'
   workflow_dispatch:
 
 permissions:
