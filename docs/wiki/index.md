@@ -1,3 +1,3 @@
 # Polaris Documentation
 
-![logo](../assets/polaris_logo.png)
+![logo](assets/polaris_logo.png)
