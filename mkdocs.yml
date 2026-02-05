@@ -1,5 +1,5 @@
 site_name: Polaris Documentation
-site_description: Argo CD cluster configuration and application deployments
+site_description: Eurac EO Argo CD cluster configuration and application deployments
 docs_dir: docs/wiki
 site_dir: site
 
