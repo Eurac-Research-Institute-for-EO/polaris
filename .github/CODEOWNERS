@@ -1,0 +1,12 @@
+# Global owners
+* @jzvolensky @Yuvraj198920
+
+# Documentation changes
+/docs/ @jzvolensky @Yuvraj198920
+
+# GitOps and cluster configuration
+*.yaml @jzvolensky @Yuvraj198920
+*.yml @jzvolensky @Yuvraj198920
+
+# Workflows require additional scrutiny
+/.github/workflows/ @jzvolensky @Yuvraj198920

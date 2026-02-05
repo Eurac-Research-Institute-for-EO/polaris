@@ -1,2 +1,3 @@
-# polaris
-Argo CD cluster configuration and application deployments
+# Polaris (WIP)
+
+Argo CD cluster configuration and application deployments.
