@@ -1,0 +1,30 @@
+site_name: Polaris Documentation
+site_description: Argo CD cluster configuration and application deployments
+docs_dir: docs/wiki
+site_dir: site
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to dark mode
+
+    - scheme: slate
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - toc.integrate
+    - content.code.annotate
+    - content.code.copy
+    - content.code.fold
+
+nav:
+  - Home: index.md
+  - Overview: overview.md
