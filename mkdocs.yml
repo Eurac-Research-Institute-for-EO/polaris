@@ -28,3 +28,6 @@ theme:
 nav:
   - Home: index.md
   - Overview: overview.md
+  - Cluster Setup:
+      - Ansible: ansible.md
+      - Deployment: deployment.md
