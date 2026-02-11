@@ -38,9 +38,8 @@ data:
         id: github
         name: GitHub
         config:
-          clientID: $dex.github.clientID
+          clientID: $dex.github.clientId
           clientSecret: $dex.github.clientSecret
-          # Restrict login to organization members only
           orgs:
             - name: Eurac-Research-Institute-for-EO
 ---
