@@ -1,0 +1,87 @@
+# Ansible playbook to clean up ArgoCD resources before reinstallation
+- name: Cleanup previous Polaris deployment
+  hosts: polaris
+  become: true
+
+  tasks:
+    - name: Ping the host to check connectivity
+      ansible.builtin.ping:
+
+    - name: Print debug message to verify task execution
+      ansible.builtin.debug:
+        msg: Goodbye Polaris!
+
+    - name: Delete existing ArgoCD Helm release (if exists)
+      ansible.builtin.shell: |
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        helm uninstall argocd --namespace argocd || true
+
+    - name: Remove finalizers from ArgoCD applications (if any exist)
+      ansible.builtin.shell: |
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        for app in $(kubectl get applications.argoproj.io -n argocd -o name 2>/dev/null || true); do
+          echo "Removing finalizers from $app"
+          kubectl patch $app -n argocd --type merge -p '{"metadata":{"finalizers":[]}}' || true
+        done
+        for appset in $(kubectl get applicationsets.argoproj.io -n argocd -o name 2>/dev/null || true); do
+          echo "Removing finalizers from $appset"
+          kubectl patch $appset -n argocd --type merge -p '{"metadata":{"finalizers":[]}}' || true
+        done
+        for proj in $(kubectl get appprojects.argoproj.io -n argocd -o name 2>/dev/null || true); do
+          echo "Removing finalizers from $proj"
+          kubectl patch $proj -n argocd --type merge -p '{"metadata":{"finalizers":[]}}' || true
+        done
+
+    - name: Delete ArgoCD cluster-scoped resources
+      ansible.builtin.shell: |
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        kubectl delete clusterrole argocd-application-controller --ignore-not-found=true || true
+        kubectl delete clusterrole argocd-server --ignore-not-found=true || true
+        kubectl delete clusterrole argocd-repo-server --ignore-not-found=true || true
+        kubectl delete clusterrolebinding argocd-application-controller --ignore-not-found=true || true
+        kubectl delete clusterrolebinding argocd-server --ignore-not-found=true || true
+        kubectl delete clusterrolebinding argocd-repo-server --ignore-not-found=true || true
+        kubectl get clusterrole -o name | grep argocd | xargs -r kubectl delete || true
+        kubectl get clusterrolebinding -o name | grep argocd | xargs -r kubectl delete || true
+
+    - name: Force delete ArgoCD namespace
+      ansible.builtin.shell: |
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        # First try normal delete
+        kubectl delete namespace argocd --ignore-not-found=true --timeout=30s || true
+        # If it hangs, force delete by removing finalizers
+        kubectl patch namespace argocd --type merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+
+    - name: Force delete ArgoCD CRDs
+      ansible.builtin.shell: |
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        # Remove finalizers from CRDs first, then delete
+        kubectl patch crd applications.argoproj.io --type merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+        kubectl patch crd applicationsets.argoproj.io --type merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+        kubectl patch crd appprojects.argoproj.io --type merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+        
+        kubectl delete crd applications.argoproj.io --ignore-not-found=true --timeout=30s || true
+        kubectl delete crd applicationsets.argoproj.io --ignore-not-found=true --timeout=30s || true
+        kubectl delete crd appprojects.argoproj.io --ignore-not-found=true --timeout=30s || true
+
+    - name: Remove existing ArgoCD network policies (if any)
+      ansible.builtin.shell: |
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        kubectl delete networkpolicy --all -n argocd --ignore-not-found=true || true
+
+    - name: Wait for complete ArgoCD cleanup
+      ansible.builtin.shell: |
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        timeout=30
+        while kubectl get namespace argocd 2>/dev/null && [ $timeout -gt 0 ]; do
+          echo "Waiting for argocd namespace to be deleted... ($timeout seconds left)"
+          sleep 2
+          timeout=$((timeout-2))
+        done
+        timeout=30
+        while kubectl get crd applications.argoproj.io 2>/dev/null && [ $timeout -gt 0 ]; do
+          echo "Waiting for ArgoCD CRDs to be deleted... ($timeout seconds left)"
+          sleep 2  
+          timeout=$((timeout-2))
+        done
+        echo "ArgoCD cleanup completed"

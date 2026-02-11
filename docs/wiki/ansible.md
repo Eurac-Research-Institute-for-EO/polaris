@@ -9,14 +9,6 @@ Infrastructure setup for polaris is done using Ansible. The Ansible playbooks ar
 - Inventory file configured with the target hosts.
 - Connecting from a machine that has access to the target servers (VPN or on-premises network).
 
-## Running the Playbook
-
-To run the Ansible playbook, navigate to the `ansible` directory and execute the following command:
-
-```bash
-ansible-playbook -i inventory.ini bootstrap.yaml
-```
-
 ## Inventory File
 
 The `inventory.ini` file should contain the details of the target hosts. For example:
@@ -90,3 +82,11 @@ Replace the encrypted values in the `bootstrap.yaml` file with the output from t
 **Note**: You will be prompted to enter a vault password, to be able to retrieve the values later. If you forget it, just recreate the vault with a new password and update the encrypted values in the `bootstrap.yaml` file.
 
 These encrypted values are safe to commit.
+
+## Running the Playbook
+
+To run the Ansible playbook, navigate to the `ansible` directory and execute the following command:
+
+```bash
+ansible-playbook -i inventory.ini bootstrap.yaml --ask-become-pass --ask-vault-pass
+```
