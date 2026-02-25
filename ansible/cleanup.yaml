@@ -2,6 +2,8 @@
 - name: Cleanup previous Polaris deployment
   hosts: polaris
   become: true
+  vars:
+    PLAYBOOK_VERSION: "1.0"
 
   tasks:
     - name: Ping the host to check connectivity
@@ -9,7 +11,7 @@
 
     - name: Print debug message to verify task execution
       ansible.builtin.debug:
-        msg: Goodbye Polaris!
+        msg: "Goodbye Polaris! Cleanup Playbook version: {{ PLAYBOOK_VERSION }}"
 
     - name: Delete existing ArgoCD Helm release (if exists)
       ansible.builtin.shell: |

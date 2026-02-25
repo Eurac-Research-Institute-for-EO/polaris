@@ -1,0 +1,43 @@
+# Ansible tasks for installing ArgoCD
+- name: Create ArgoCD namespace
+  ansible.builtin.shell: |
+      kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_namespace
+  changed_when: "'created' in argocd_namespace.stdout"
+
+- name: Add ArgoCD Helm repository
+  ansible.builtin.shell: |
+      helm repo list | grep -q '^argo' || helm repo add argo https://argoproj.github.io/argo-helm
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: helm_argo_repo
+  changed_when: "'has been added' in helm_argo_repo.stdout or helm_argo_repo.rc == 0"
+  failed_when: helm_argo_repo.rc != 0
+
+- name: Update Helm repositories
+  ansible.builtin.command: helm repo update
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  changed_when: false
+
+- name: Install ArgoCD via Helm
+  ansible.builtin.shell: |
+      helm upgrade --install argocd argo/argo-cd \
+        --namespace argocd \
+        --create-namespace \
+        --version {{ ARGOCD_VERSION }} \
+        --set server.service.type=ClusterIP \
+        --set configs.params."server\.insecure"=true
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_install
+  changed_when: "'has been upgraded' in argocd_install.stdout or 'has been installed' in argocd_install.stdout"
+
+- name: Wait for ArgoCD to be ready
+  ansible.builtin.command: |
+      kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  changed_when: false

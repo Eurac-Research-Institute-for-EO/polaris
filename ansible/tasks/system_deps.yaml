@@ -1,0 +1,27 @@
+# Ansible tasks for installing generic system dependencies
+- name: Ping the host to check connectivity
+  ansible.builtin.ping:
+
+- name: Print debug message to verify task execution
+  ansible.builtin.debug:
+      msg: "Hello Polaris! Playbook version: {{ PLAYBOOK_VERSION }}"
+
+  # TODO: VM specific fix, likely not needed in general
+- name: Remove duplicate Microsoft repository file
+  ansible.builtin.file:
+      path: /etc/apt/sources.list.d/microsoft-prod.list.list
+      state: absent
+
+- name: Update apt cache
+  ansible.builtin.apt:
+      update_cache: yes
+
+- name: Install generic dependencies
+  ansible.builtin.apt:
+      name: "{{ item }}"
+      state: present
+  loop:
+      - curl
+      - apt-transport-https
+      - ca-certificates
+      - software-properties-common
