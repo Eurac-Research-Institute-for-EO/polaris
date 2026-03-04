@@ -52,10 +52,11 @@
                         - name: Eurac-Research-Institute-for-EO
             rbac:
               policy.csv: |
-                g, jzvolensky, role:admin
-                g, Yuvraj198920, role:admin
+                g, juro.zvolensky@gmail.com, role:admin
+                g, yuvraj.adagale@eurac.edu, role:admin
                 g, Eurac-Research-Institute-for-EO:*, role:readonly
               policy.default: role:readonly
+              scopes: '[email]'
       dest: /tmp/argocd-values.yaml
       mode: "0644"
 
