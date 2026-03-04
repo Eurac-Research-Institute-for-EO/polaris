@@ -4,42 +4,45 @@ docs_dir: docs/wiki
 site_dir: site
 
 theme:
-  name: material
-  palette:
-    - scheme: default
-      toggle:
-        icon: material/toggle-switch
-        name: Switch to dark mode
+    name: material
+    palette:
+        - scheme: default
+          toggle:
+              icon: material/toggle-switch
+              name: Switch to dark mode
 
-    - scheme: slate
-      toggle:
-        icon: material/toggle-switch-off-outline
-        name: Switch to light mode
-  features:
-    - navigation.tabs
-    - navigation.top
-    - search.highlight
-    - search.suggest
-    - toc.integrate
-    - content.code.annotate
-    - content.code.copy
-    - content.code.fold
+        - scheme: slate
+          toggle:
+              icon: material/toggle-switch-off-outline
+              name: Switch to light mode
+    features:
+        - navigation.tabs
+        - navigation.top
+        - search.highlight
+        - search.suggest
+        - toc.integrate
+        - content.code.annotate
+        - content.code.copy
+        - content.code.fold
 
 nav:
-  - Home: index.md
-  - Overview: overview.md
-  - Cluster Setup:
-      - Ansible: ansible.md
-      - Deployment: deployment.md
-      - Uninstall: uninstall.md
+    - Home: index.md
+    - Overview: overview.md
+    - Cluster Setup:
+          - Ansible: ansible.md
+          - Deployment: deployment.md
+          - Uninstall: uninstall.md
+    - Applications:
+          - Hello Nginx: applications/hello-nginx.md
+          - Keycloak: applications/keycloak.md
 
 markdown_extensions:
-  - pymdownx.highlight:
-      anchor_linenums: true
-      line_spans: __span
-      pygments_lang_class: true
-  - pymdownx.inlinehilite
-  - pymdownx.superfences
-  - pymdownx.snippets
-  - admonition
-  - pymdownx.details
+    - pymdownx.highlight:
+          anchor_linenums: true
+          line_spans: __span
+          pygments_lang_class: true
+    - pymdownx.inlinehilite
+    - pymdownx.superfences
+    - pymdownx.snippets
+    - admonition
+    - pymdownx.details

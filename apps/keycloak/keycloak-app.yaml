@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+    name: keycloak
+    namespace: argocd
+    finalizers:
+        - resources-finalizer.argocd.argoproj.io
+spec:
+    project: polaris
+    source:
+        repoURL: https://github.com/Eurac-Research-Institute-for-EO/polaris
+        targetRevision: main
+        path: apps/keycloak
+    destination:
+        server: https://kubernetes.default.svc
+        namespace: keycloak
+    syncPolicy:
+        automated:
+            prune: true
+            selfHeal: true
+        syncOptions:
+            - CreateNamespace=true
