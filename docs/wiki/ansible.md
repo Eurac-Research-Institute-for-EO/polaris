@@ -35,32 +35,6 @@ The `tasks` directory contains individual task files that are included in the ma
 | `tasks/argocd.yaml` | Task to install Argo CD on the target server. |
 | `tasks/argo_github_auth.yaml` | Task to configure Argo CD with GitHub OAuth. |
 
-## Configure Argo CD repository
-
-By default we point the Argo CD application to the `main` branch of the Polaris repository. If you want to use a different branch, or add more repositories, you can modify the Argo CD application manifest located in the `argocd` directory.
-
-Here is a sample configuration for the Argo CD application:
-
-```yaml
----
-apiVersion: argoproj.io/v1alpha1
-kind: AppProject
-metadata:
-  name: polaris
-  namespace: argocd
-spec:
-  description: Polaris Work Cluster Applications
-  sourceRepos:
-    - 'https://github.com/Eurac-Research-Institute-for-EO/polaris'
-  destinations:
-    - namespace: '*'
-      server: https://kubernetes.default.svc
-  clusterResourceWhitelist:
-    - group: '*'
-      kind: '*'
----
-```
-
 ## Secrets Management
 
 Sensitive information such as GitHub OAuth client ID and secret are stored using Ansible Vault. Make sure to create and edit the vault file to include these secrets before running the playbook.
