@@ -44,18 +44,70 @@
   register: patch_secret
   changed_when: "'patched' in patch_secret.stdout"
 
-- name: Copy ArgoCD custom manifests to target
+- name: Create ArgoCD AppProject manifest
   ansible.builtin.copy:
-      src: ../argocd/
-      dest: /tmp/argocd-custom/
+      content: |
+          apiVersion: argoproj.io/v1alpha1
+          kind: AppProject
+          metadata:
+            name: polaris
+            namespace: argocd
+          spec:
+            description: Polaris Work Cluster Applications
+            sourceRepos:
+              - "https://github.com/Eurac-Research-Institute-for-EO/polaris"
+            destinations:
+              - namespace: "*"
+                server: https://kubernetes.default.svc
+            clusterResourceWhitelist:
+              - group: "*"
+                kind: "*"
+      dest: /tmp/argocd-appproject.yaml
+      mode: "0644"
 
-- name: Apply ArgoCD customizations from repo
+- name: Create ArgoCD Application manifest
+  ansible.builtin.copy:
+      content: |
+          apiVersion: argoproj.io/v1alpha1
+          kind: Application
+          metadata:
+            name: polaris-apps
+            namespace: argocd
+            finalizers:
+              - resources-finalizer.argocd.argoproj.io
+          spec:
+            project: polaris
+            source:
+              repoURL: https://github.com/Eurac-Research-Institute-for-EO/polaris
+              targetRevision: main
+              path: apps
+            destination:
+              server: https://kubernetes.default.svc
+              namespace: argocd
+            syncPolicy:
+              automated:
+                prune: true
+                selfHeal: true
+              syncOptions:
+                - CreateNamespace=true
+      dest: /tmp/argocd-application.yaml
+      mode: "0644"
+
+- name: Apply ArgoCD AppProject
   ansible.builtin.shell: |
-      kubectl apply -f /tmp/argocd-custom/deployment.yaml
+      kubectl apply -f /tmp/argocd-appproject.yaml
   environment:
       KUBECONFIG: "{{ kubeconfig_path }}"
-  register: argocd_custom
-  changed_when: "'created' in argocd_custom.stdout or 'configured' in argocd_custom.stdout"
+  register: argocd_project
+  changed_when: "'created' in argocd_project.stdout or 'configured' in argocd_project.stdout"
+
+- name: Apply ArgoCD Application
+  ansible.builtin.shell: |
+      kubectl apply -f /tmp/argocd-application.yaml
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_app
+  changed_when: "'created' in argocd_app.stdout or 'configured' in argocd_app.stdout"
 
 - name: Restart ArgoCD server to apply changes
   ansible.builtin.shell: |
@@ -64,7 +116,7 @@
       KUBECONFIG: "{{ kubeconfig_path }}"
   register: argocd_restart
   changed_when: "'restarted' in argocd_restart.stdout"
-  when: argocd_custom.changed or patch_secret.changed
+  when: patch_secret.changed
 
 - name: Wait for ArgoCD server rollout
   ansible.builtin.command: |
@@ -72,4 +124,4 @@
   environment:
       KUBECONFIG: "{{ kubeconfig_path }}"
   changed_when: false
-  when: argocd_custom.changed or patch_secret.changed
+  when: patch_secret.changed

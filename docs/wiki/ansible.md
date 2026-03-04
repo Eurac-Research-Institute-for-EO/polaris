@@ -30,6 +30,7 @@ The `tasks` directory contains individual task files that are included in the ma
 | `tasks/system_deps.yaml` | Task to install system dependencies on the target server. |
 | `tasks/k3s.yaml` | Task to install k3s on the target server. |
 | `tasks/helm.yaml` | Task to install Helm on the target server. |
+| `tasks/coredns.yaml` | Task to configure CoreDNS on the target server. |
 | `tasks/sealed_secrets.yaml` | Task to install Sealed Secrets on the target server. |
 | `tasks/argocd.yaml` | Task to install Argo CD on the target server. |
 | `tasks/argo_github_auth.yaml` | Task to configure Argo CD with GitHub OAuth. |

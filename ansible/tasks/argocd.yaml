@@ -22,14 +22,51 @@
       KUBECONFIG: "{{ kubeconfig_path }}"
   changed_when: false
 
+- name: Create ArgoCD Helm values file
+  ansible.builtin.copy:
+      content: |
+          server:
+            service:
+              type: ClusterIP
+            ingress:
+              enabled: true
+              ingressClassName: traefik
+              annotations:
+                traefik.ingress.kubernetes.io/router.entrypoints: web
+              hostname: argocd.10.8.244.214.nip.io
+
+          configs:
+            params:
+              server.insecure: true
+            cm:
+              url: "http://argocd.10.8.244.214.nip.io"
+              dex.config: |
+                connectors:
+                  - type: github
+                    id: github
+                    name: GitHub
+                    config:
+                      clientID: $dex.github.clientId
+                      clientSecret: $dex.github.clientSecret
+                      orgs:
+                        - name: Eurac-Research-Institute-for-EO
+            rbac:
+              policy.csv: |
+                g, jzvolensky, role:admin
+                g, Yuvraj198920, role:admin
+                g, Eurac-Research-Institute-for-EO:*, role:readonly
+              policy.default: role:readonly
+      dest: /tmp/argocd-values.yaml
+      mode: "0644"
+
 - name: Install ArgoCD via Helm
   ansible.builtin.shell: |
       helm upgrade --install argocd argo/argo-cd \
         --namespace argocd \
         --create-namespace \
         --version {{ ARGOCD_VERSION }} \
-        --set server.service.type=ClusterIP \
-        --set configs.params."server\.insecure"=true
+        --values /tmp/argocd-values.yaml \
+        --reset-values
   environment:
       KUBECONFIG: "{{ kubeconfig_path }}"
   register: argocd_install
