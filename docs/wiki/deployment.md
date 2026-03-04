@@ -498,19 +498,3 @@ If you need to start over completely:
    ```bash
    ansible-playbook -i ansible/inventory.ini ansible/bootstrap.yaml --ask-vault-pass
    ```
-
-## Additional Resources
-
-- [Architecture Documentation](../architecture.md) - Detailed system architecture diagrams
-- [Ansible Setup Guide](./ansible.md) - Detailed Ansible configuration
-- [ArgoCD Documentation](https://argo-cd.readthedocs.io/) - Official ArgoCD documentation
-- [K3s Documentation](https://docs.k3s.io/) - Official K3s documentation
-- [Kustomize Documentation](https://kustomize.io/) - Official Kustomize documentation
-
-## Support
-
-For issues or questions:
-- Review the troubleshooting section above
-- Check ArgoCD application logs and events
-- Consult the GitHub repository issues
-- Contact the platform team
