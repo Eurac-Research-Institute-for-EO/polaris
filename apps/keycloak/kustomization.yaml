@@ -1,0 +1,26 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: keycloak
+
+commonLabels:
+  app.kubernetes.io/name: keycloak
+  app.kubernetes.io/managed-by: kustomize
+  app.kubernetes.io/part-of: keycloak
+
+resources:
+  - namespace.yaml
+  - postgresql-pvc.yaml
+  - postgresql-secret.yaml
+  - postgresql-statefulset.yaml
+  - postgresql-service.yaml
+  - keycloak-secret.yaml
+  - keycloak-deployment.yaml
+  - keycloak-service.yaml
+  - keycloak-ingress.yaml
+
+replicas:
+  - name: keycloak
+    count: 2
+  - name: postgresql
+    count: 1

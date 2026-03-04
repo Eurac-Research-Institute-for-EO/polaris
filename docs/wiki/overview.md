@@ -8,7 +8,7 @@ Sealed Secrets is used to securely store sensitive information such as passwords
 
 ## Architecture
 
-TODO
+The cluster uses Argo CD and Kustomize as an `app of apps` to manage the cluster configuration and applications. This means that we have a central repository that defines the overall structure of the cluster, and individual repositories for each application or component. The central repository contains the main configuration files and references to the individual application repositories. Each application repository contains the specific configuration for that application, including any necessary secrets, deployments, and services. This approach allows for a modular and scalable architecture, where we can easily add or remove applications without affecting the overall cluster configuration.
 
 ## Tools
 

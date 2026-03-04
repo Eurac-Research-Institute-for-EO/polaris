@@ -4,12 +4,20 @@
   become: true
   vars:
       PLAYBOOK_VERSION: "1.1"
+      # Versions of the software components to be installed
       K3S_VERSION: "v1.35.0+k3s3"
       ARGOCD_VERSION: "9.4.0"
       HELM_VERSION: "v4.1.1"
       SEALED_SECRETS_VERSION: "v0.34.0"
       SEALED_SECRETS_DOWNLOAD: "0.34.0"
       kubeconfig_path: /etc/rancher/k3s/k3s.yaml
+      # Argo CD user setup
+      # GitHub org receives READONLY by default
+      ARGOCD_ADMINS:
+          - juro.zvolensky@gmail.com
+          - yuvvraaj0flying@gmail.com
+      GITHUB_ORGANIZATION: Eurac-Research-Institute-for-EO
+      # GitHub OAuth credentials for ArgoCD (stored securely in Ansible Vault)
       github_oauth_client_id: !vault |
           $ANSIBLE_VAULT;1.1;AES256
           39623530346661616664336166303865623739666533333133646237303934346637386431653735

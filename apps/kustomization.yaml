@@ -3,3 +3,4 @@ kind: Kustomization
 
 resources:
     - hello-nginx/hello-nginx-app.yaml
+    - keycloak/keycloak-app.yaml
