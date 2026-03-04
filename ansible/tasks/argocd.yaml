@@ -52,9 +52,10 @@
                         - name: Eurac-Research-Institute-for-EO
             rbac:
               policy.csv: |
-                g, juro.zvolensky@gmail.com, role:admin
-                g, yuvraj.adagale@eurac.edu, role:admin
-                g, Eurac-Research-Institute-for-EO:*, role:readonly
+            {% for admin in ARGOCD_ADMINS %}
+              g, {{ admin }}, role:admin
+            {% endfor %}
+              g, {{ GITHUB_ORGANIZATION }}:*, role:readonly
               policy.default: role:readonly
               scopes: '[email]'
       dest: /tmp/argocd-values.yaml
