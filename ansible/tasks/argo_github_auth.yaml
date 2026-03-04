@@ -1,0 +1,127 @@
+# Ansible tasks for configuring ArgoCD with GitHub OAuth
+- name: Create and seal GitHub OAuth secret
+  ansible.builtin.shell: |
+      kubectl create secret generic github-oauth \
+        --namespace=argocd \
+        --from-literal=dex.github.clientId="{{ github_oauth_client_id }}" \
+        --from-literal=dex.github.clientSecret="{{ github_oauth_client_secret }}" \
+        --dry-run=client -o yaml | \
+      kubeseal --format=yaml --controller-name=sealed-secrets --controller-namespace=kube-system | \
+      kubectl apply -f -
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: github_oauth_secret
+  changed_when: "'created' in github_oauth_secret.stdout or 'configured' in github_oauth_secret.stdout"
+
+- name: Wait for sealed secret to be unsealed
+  ansible.builtin.command: |
+      kubectl wait --for=jsonpath='{.data.dex\.github\.clientId}' secret/github-oauth -n argocd --timeout=60s
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  changed_when: false
+
+- name: Get GitHub OAuth client ID from secret
+  ansible.builtin.command: |
+      kubectl get secret github-oauth -n argocd -o jsonpath='{.data.dex\.github\.clientId}'
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: client_id
+  changed_when: false
+
+- name: Get GitHub OAuth client secret from secret
+  ansible.builtin.command: |
+      kubectl get secret github-oauth -n argocd -o jsonpath='{.data.dex\.github\.clientSecret}'
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: client_secret
+  changed_when: false
+
+- name: Patch ArgoCD secret with GitHub OAuth credentials
+  ansible.builtin.shell: |
+      kubectl patch secret argocd-secret -n argocd --type merge -p '{"data":{"dex.github.clientId":"{{ client_id.stdout }}","dex.github.clientSecret":"{{ client_secret.stdout }}"}}'
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: patch_secret
+  changed_when: "'patched' in patch_secret.stdout"
+
+- name: Create ArgoCD AppProject manifest
+  ansible.builtin.copy:
+      content: |
+          apiVersion: argoproj.io/v1alpha1
+          kind: AppProject
+          metadata:
+            name: polaris
+            namespace: argocd
+          spec:
+            description: Polaris Work Cluster Applications
+            sourceRepos:
+              - "https://github.com/Eurac-Research-Institute-for-EO/polaris"
+            destinations:
+              - namespace: "*"
+                server: https://kubernetes.default.svc
+            clusterResourceWhitelist:
+              - group: "*"
+                kind: "*"
+      dest: /tmp/argocd-appproject.yaml
+      mode: "0644"
+
+- name: Create ArgoCD Application manifest
+  ansible.builtin.copy:
+      content: |
+          apiVersion: argoproj.io/v1alpha1
+          kind: Application
+          metadata:
+            name: polaris-apps
+            namespace: argocd
+            finalizers:
+              - resources-finalizer.argocd.argoproj.io
+          spec:
+            project: polaris
+            source:
+              repoURL: https://github.com/Eurac-Research-Institute-for-EO/polaris
+              targetRevision: main
+              path: apps
+            destination:
+              server: https://kubernetes.default.svc
+              namespace: argocd
+            syncPolicy:
+              automated:
+                prune: true
+                selfHeal: true
+              syncOptions:
+                - CreateNamespace=true
+      dest: /tmp/argocd-application.yaml
+      mode: "0644"
+
+- name: Apply ArgoCD AppProject
+  ansible.builtin.shell: |
+      kubectl apply -f /tmp/argocd-appproject.yaml
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_project
+  changed_when: "'created' in argocd_project.stdout or 'configured' in argocd_project.stdout"
+
+- name: Apply ArgoCD Application
+  ansible.builtin.shell: |
+      kubectl apply -f /tmp/argocd-application.yaml
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_app
+  changed_when: "'created' in argocd_app.stdout or 'configured' in argocd_app.stdout"
+
+- name: Restart ArgoCD server to apply changes
+  ansible.builtin.shell: |
+      kubectl rollout restart deployment/argocd-server -n argocd
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_restart
+  changed_when: "'restarted' in argocd_restart.stdout"
+  when: patch_secret.changed
+
+- name: Wait for ArgoCD server rollout
+  ansible.builtin.command: |
+      kubectl rollout status deployment/argocd-server -n argocd --timeout=300s
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  changed_when: false
+  when: patch_secret.changed

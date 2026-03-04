@@ -5,7 +5,7 @@ Sometimes you may want to uninstall Polaris and all of its components.
 To do this, run the `cleanup.yaml` Ansible playbook:
 
 ```bash
-ansible-playbook -i inventory.yaml cleanup.yaml
+ansible-playbook -i inventory.ini cleanup.yaml --ask-become-pass
 ```
 
 This playbook will:

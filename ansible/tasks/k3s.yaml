@@ -1,0 +1,25 @@
+# Ansible tasks for installing k3s
+- name: Check if k3s is already installed
+  ansible.builtin.stat:
+      path: /usr/local/bin/k3s
+  register: k3s_binary
+
+- name: Check k3s version if installed
+  ansible.builtin.command: /usr/local/bin/k3s --version
+  register: k3s_version_output
+  changed_when: false
+  failed_when: false
+  when: k3s_binary.stat.exists
+
+- name: Install k3s
+  ansible.builtin.shell: |
+      curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="{{ K3S_VERSION }}" sh -
+  when: not k3s_binary.stat.exists or K3S_VERSION not in k3s_version_output.stdout
+  register: k3s_install
+  changed_when: k3s_install.rc == 0
+
+- name: Wait for k3s to be ready
+  ansible.builtin.wait_for:
+      path: /etc/rancher/k3s/k3s.yaml
+      state: present
+      timeout: 300

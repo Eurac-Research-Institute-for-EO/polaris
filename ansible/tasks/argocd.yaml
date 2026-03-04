@@ -1,0 +1,80 @@
+# Ansible tasks for installing ArgoCD
+- name: Create ArgoCD namespace
+  ansible.builtin.shell: |
+      kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_namespace
+  changed_when: "'created' in argocd_namespace.stdout"
+
+- name: Add ArgoCD Helm repository
+  ansible.builtin.shell: |
+      helm repo list | grep -q '^argo' || helm repo add argo https://argoproj.github.io/argo-helm
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: helm_argo_repo
+  changed_when: "'has been added' in helm_argo_repo.stdout or helm_argo_repo.rc == 0"
+  failed_when: helm_argo_repo.rc != 0
+
+- name: Update Helm repositories
+  ansible.builtin.command: helm repo update
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  changed_when: false
+
+- name: Create ArgoCD Helm values file
+  ansible.builtin.copy:
+      content: |
+          server:
+            service:
+              type: ClusterIP
+            ingress:
+              enabled: true
+              ingressClassName: traefik
+              annotations:
+                traefik.ingress.kubernetes.io/router.entrypoints: web
+              hostname: argocd.10.8.244.214.nip.io
+
+          configs:
+            params:
+              server.insecure: true
+            cm:
+              url: "http://argocd.10.8.244.214.nip.io"
+              dex.config: |
+                connectors:
+                  - type: github
+                    id: github
+                    name: GitHub
+                    config:
+                      clientID: $dex.github.clientId
+                      clientSecret: $dex.github.clientSecret
+                      orgs:
+                        - name: Eurac-Research-Institute-for-EO
+            rbac:
+              policy.csv: |
+                g, jzvolensky, role:admin
+                g, Yuvraj198920, role:admin
+                g, Eurac-Research-Institute-for-EO:*, role:readonly
+              policy.default: role:readonly
+      dest: /tmp/argocd-values.yaml
+      mode: "0644"
+
+- name: Install ArgoCD via Helm
+  ansible.builtin.shell: |
+      helm upgrade --install argocd argo/argo-cd \
+        --namespace argocd \
+        --create-namespace \
+        --version {{ ARGOCD_VERSION }} \
+        --values /tmp/argocd-values.yaml \
+        --reset-values
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_install
+  changed_when: "'has been upgraded' in argocd_install.stdout or 'has been installed' in argocd_install.stdout"
+
+- name: Wait for ArgoCD to be ready
+  ansible.builtin.command: |
+      kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  changed_when: false

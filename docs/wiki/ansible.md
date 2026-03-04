@@ -20,16 +20,20 @@ The `inventory.ini` file should contain the details of the target hosts. For exa
 
 ## Playbook Configuration
 
-The `bootstrap.yaml` file contains the tasks to set up Polaris on the target servers. You can customize the playbook according to your requirements.
+The `bootstrap.yaml` file contains the main playbook to install and configure the necessary components for Polaris. You can customize this playbook to fit your specific requirements, such as adding additional tasks or modifying existing ones.
 
-Currently, the playbook includes tasks for installing necessary dependencies, configuring the environment, and deploying Polaris base cluster with Argo CD.
+The `tasks` directory contains individual task files that are included in the main playbook. These tasks handle specific aspects of the setup, such as installing Argo CD, configuring secrets, and setting up applications.
 
-Installed components include:
-
-- Helm
-- K3s
-- Sealed Secrets
-- ArgoCD
+| Task file | Description |
+|------|-------------|
+| `bootstrap.yaml` | Main playbook to set up base Polaris infrastructure. |
+| `tasks/system_deps.yaml` | Task to install system dependencies on the target server. |
+| `tasks/k3s.yaml` | Task to install k3s on the target server. |
+| `tasks/helm.yaml` | Task to install Helm on the target server. |
+| `tasks/coredns.yaml` | Task to configure CoreDNS on the target server. |
+| `tasks/sealed_secrets.yaml` | Task to install Sealed Secrets on the target server. |
+| `tasks/argocd.yaml` | Task to install Argo CD on the target server. |
+| `tasks/argo_github_auth.yaml` | Task to configure Argo CD with GitHub OAuth. |
 
 ## Configure Argo CD repository
 

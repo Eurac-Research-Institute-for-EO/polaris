@@ -3,158 +3,47 @@
   hosts: polaris
   become: true
   vars:
-    K3S_VERSION: "v1.35.0+k3s3"
-    ARGOCD_VERSION: "9.4.0"
-    HELM_VERSION: "v4.1.1"
-    SEALED_SECRETS_VERSION: "v0.34.0"
-    SEALED_SECRETS_DOWNLOAD: "0.34.0"
-    github_oauth_client_id: !vault |
-      $ANSIBLE_VAULT;1.1;AES256
-      39623530346661616664336166303865623739666533333133646237303934346637386431653735
-      6162316161366462316630623835613563643130393234620a343934363036306337303230313963
-      34303834613462356130343533343539376261386633313066356336333232616139663266613439
-      3636643033613431340a666638646233356661353332323836383033323531393865353261306663
-      32353261326230316135653661316633653166346564306330313230316635376636
-    github_oauth_client_secret: !vault |
-      $ANSIBLE_VAULT;1.1;AES256
-      62306536386232313932313136656333666537636533646661316663663939343437636336303662
-      3361373631306266333133366235616163343634313837620a643330656437373462353637643364
-      39353264306165666262623032323833323136313633306538623638643562326530663830343364
-      3634313963343733630a346362313462666333386334643337663163663936383664656566343132
-      61666430353233363238633366653131343366323939626165636639343430646165313763623138
-      3036326166323139343836626631636235396563623166623763
+      PLAYBOOK_VERSION: "1.1"
+      K3S_VERSION: "v1.35.0+k3s3"
+      ARGOCD_VERSION: "9.4.0"
+      HELM_VERSION: "v4.1.1"
+      SEALED_SECRETS_VERSION: "v0.34.0"
+      SEALED_SECRETS_DOWNLOAD: "0.34.0"
+      kubeconfig_path: /etc/rancher/k3s/k3s.yaml
+      github_oauth_client_id: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          39623530346661616664336166303865623739666533333133646237303934346637386431653735
+          6162316161366462316630623835613563643130393234620a343934363036306337303230313963
+          34303834613462356130343533343539376261386633313066356336333232616139663266613439
+          3636643033613431340a666638646233356661353332323836383033323531393865353261306663
+          32353261326230316135653661316633653166346564306330313230316635376636
+      github_oauth_client_secret: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          62306536386232313932313136656333666537636533646661316663663939343437636336303662
+          3361373631306266333133366235616163343634313837620a643330656437373462353637643364
+          39353264306165666262623032323833323136313633306538623638643562326530663830343364
+          3634313963343733630a346362313462666333386334643337663163663936383664656566343132
+          61666430353233363238633366653131343366323939626165636639343430646165313763623138
+          3036326166323139343836626631636235396563623166623763
   tasks:
-    - name: Ping the host to check connectivity
-      ansible.builtin.ping:
-
-    - name: Print debug message to verify task execution
-      ansible.builtin.debug:
-        msg: Hello Polaris!
-    # TODO: Testing VM specific fix, remove once deployment is stable
-    - name: Remove duplicate Microsoft repository file
-      ansible.builtin.file:
-        path: /etc/apt/sources.list.d/microsoft-prod.list.list
-        state: absent
-
-    - name: Update apt cache
-      ansible.builtin.apt:
-        update_cache: yes
-
-    - name: Install generic dependencies
-      ansible.builtin.apt:
-        name: "{{ item }}"
-        state: present
-      loop:
-        - curl
-        - apt-transport-https
-        - ca-certificates
-        - software-properties-common
-
-    - name: Install k3s
-      ansible.builtin.shell: |
-        curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="{{ K3S_VERSION }}" sh -
-      args:
-        creates: /usr/local/bin/k3s
-
-    - name: Wait for k3s to be ready
-      ansible.builtin.wait_for:
-        path: /etc/rancher/k3s/k3s.yaml
-        state: present
-        timeout: 300
-
-    - name: Install Helm
-      ansible.builtin.shell: |
-        curl -sSL https://get.helm.sh/helm-{{ HELM_VERSION }}-linux-amd64.tar.gz | tar xz -C /tmp
-        mv /tmp/linux-amd64/helm /usr/local/bin/helm
-      args:
-        creates: /usr/local/bin/helm
-
-    - name: Install kubeseal CLI
-      ansible.builtin.shell: |
-        wget https://github.com/bitnami-labs/sealed-secrets/releases/download/{{ SEALED_SECRETS_VERSION }}/kubeseal-{{ SEALED_SECRETS_DOWNLOAD }}-linux-amd64.tar.gz
-        tar xfz kubeseal-{{ SEALED_SECRETS_DOWNLOAD }}-linux-amd64.tar.gz -C /usr/local/bin
-        chmod +x /usr/local/bin/kubeseal
-      args:
-        creates: /usr/local/bin/kubeseal
-
-    - name: Add Sealed Secrets Helm repo
-      ansible.builtin.shell: |
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-        helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
-        helm repo update
-
-    - name: Install Sealed Secrets controller
-      ansible.builtin.shell: |
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-        helm upgrade --install sealed-secrets sealed-secrets/sealed-secrets \
-        --namespace kube-system
-
-    - name: Wait for Sealed Secrets controller
-      ansible.builtin.shell: |
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-        kubectl wait --for=condition=available --timeout=300s deployment/sealed-secrets -n kube-system
-
-    - name: Create ArgoCD namespace
-      ansible.builtin.shell: |
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-        kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
-
-    - name: Add ArgoCD Helm repository
-      ansible.builtin.shell: |
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-        helm repo add argo https://argoproj.github.io/argo-helm
-        helm repo update
-
-    - name: Install ArgoCD via Helm
-      ansible.builtin.shell: |
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-        helm upgrade --install argocd argo/argo-cd \
-          --namespace argocd \
-          --create-namespace \
-          --version {{ ARGOCD_VERSION }} \
-          --set server.service.type=ClusterIP \
-          --set configs.params."server\.insecure"=true
-
-    - name: Wait for ArgoCD to be ready
-      ansible.builtin.shell: |
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-        kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
-
-    - name: Create and seal GitHub OAuth secret
-      ansible.builtin.shell: |
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-        kubectl create secret generic github-oauth \
-          --namespace=argocd \
-          --from-literal=dex.github.clientId="{{ github_oauth_client_id }}" \
-          --from-literal=dex.github.clientSecret="{{ github_oauth_client_secret }}" \
-          --dry-run=client -o yaml | \
-        kubeseal --format=yaml --controller-name=sealed-secrets --controller-namespace=kube-system | \
-        kubectl apply -f -
-
-    - name: Wait for sealed secret to be unsealed
-      ansible.builtin.shell: |
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-        kubectl wait --for=jsonpath='{.data.dex\.github\.clientId}' secret/github-oauth -n argocd --timeout=60s
-
-    - name: Patch ArgoCD secret with GitHub OAuth credentials
-      ansible.builtin.shell: |
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-        CLIENT_ID=$(kubectl get secret github-oauth -n argocd -o jsonpath='{.data.dex\.github\.clientId}')
-        CLIENT_SECRET=$(kubectl get secret github-oauth -n argocd -o jsonpath='{.data.dex\.github\.clientSecret}')
-        kubectl patch secret argocd-secret -n argocd --type merge -p "{\"data\":{\"dex.github.clientId\":\"$CLIENT_ID\",\"dex.github.clientSecret\":\"$CLIENT_SECRET\"}}"
-
-    - name: Copy ArgoCD custom manifests to target
-      ansible.builtin.copy:
-        src: ../argocd/
-        dest: /tmp/argocd-custom/
-
-    - name: Apply ArgoCD customizations from repo
-      ansible.builtin.shell: |
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-        kubectl apply -f /tmp/argocd-custom/deployment.yaml
-
-    - name: Restart ArgoCD server to apply changes
-      ansible.builtin.shell: |
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-        kubectl rollout restart deployment/argocd-server -n argocd
-        kubectl rollout status deployment/argocd-server -n argocd --timeout=300s
+      - name: Install system dependencies
+        ansible.builtin.include_tasks:
+            file: tasks/system_deps.yaml
+      - name: Install k3s
+        ansible.builtin.include_tasks:
+            file: tasks/k3s.yaml
+      - name: Configure CoreDNS
+        ansible.builtin.include_tasks:
+            file: tasks/coredns.yaml
+      - name: Install Helm
+        ansible.builtin.include_tasks:
+            file: tasks/helm.yaml
+      - name: Install Sealed Secrets
+        ansible.builtin.include_tasks:
+            file: tasks/sealed_secrets.yaml
+      - name: Install ArgoCD
+        ansible.builtin.include_tasks:
+            file: tasks/argocd.yaml
+      - name: Configure ArgoCD with GitHub OAuth
+        ansible.builtin.include_tasks:
+            file: tasks/argo_github_auth.yaml
