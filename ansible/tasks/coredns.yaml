@@ -1,0 +1,82 @@
+# Ansible tasks for configuring CoreDNS
+# Required DNS bypass to use HTTPS in Pods
+- name: Wait for CoreDNS deployment to be available
+  ansible.builtin.shell: |
+      kubectl --kubeconfig {{ kubeconfig_path }} wait --namespace kube-system \
+        --for=condition=available deployment/coredns \
+        --timeout=300s
+  register: coredns_wait
+  changed_when: false
+  retries: 3
+  delay: 10
+  until: coredns_wait.rc == 0
+
+- name: Get current CoreDNS ConfigMap
+  ansible.builtin.shell: |
+      kubectl --kubeconfig {{ kubeconfig_path }} get configmap coredns -n kube-system -o yaml
+  register: coredns_configmap
+  changed_when: false
+
+- name: Backup original CoreDNS ConfigMap
+  ansible.builtin.copy:
+      content: "{{ coredns_configmap.stdout }}"
+      dest: /tmp/coredns-configmap-backup.yaml
+      mode: "0644"
+
+- name: Create custom CoreDNS ConfigMap
+  ansible.builtin.copy:
+      content: |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: coredns
+            namespace: kube-system
+          data:
+            Corefile: |
+              .:53 {
+                  errors
+                  health {
+                      lameduck 5s
+                  }
+                  ready
+                  kubernetes cluster.local in-addr.arpa ip6.arpa {
+                      pods insecure
+                      fallthrough in-addr.arpa ip6.arpa
+                      ttl 30
+                  }
+                  prometheus :9153
+                  forward . 1.1.1.1 8.8.8.8
+                  cache 30
+                  loop
+                  reload
+                  loadbalance
+              }
+      dest: /tmp/coredns-configmap.yaml
+      mode: "0644"
+
+- name: Apply custom CoreDNS ConfigMap
+  ansible.builtin.shell: |
+      kubectl --kubeconfig {{ kubeconfig_path }} apply -f /tmp/coredns-configmap.yaml
+  register: coredns_apply
+  changed_when: "'configured' in coredns_apply.stdout or 'created' in coredns_apply.stdout"
+
+- name: Restart CoreDNS pods to apply changes
+  ansible.builtin.shell: |
+      kubectl --kubeconfig {{ kubeconfig_path }} rollout restart deployment/coredns -n kube-system
+  when: coredns_apply.changed
+
+- name: Wait for CoreDNS rollout to complete
+  ansible.builtin.shell: |
+      kubectl --kubeconfig {{ kubeconfig_path }} rollout status deployment/coredns -n kube-system --timeout=300s
+  when: coredns_apply.changed
+  changed_when: false
+
+- name: Verify CoreDNS configuration
+  ansible.builtin.shell: |
+      kubectl --kubeconfig {{ kubeconfig_path }} get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}'
+  register: coredns_verify
+  changed_when: false
+
+- name: Display CoreDNS configuration
+  ansible.builtin.debug:
+      msg: "{{ coredns_verify.stdout }}"

@@ -32,6 +32,9 @@
       - name: Install k3s
         ansible.builtin.include_tasks:
             file: tasks/k3s.yaml
+      - name: Configure CoreDNS
+        ansible.builtin.include_tasks:
+            file: tasks/coredns.yaml
       - name: Install Helm
         ansible.builtin.include_tasks:
             file: tasks/helm.yaml
