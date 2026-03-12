@@ -10,6 +10,7 @@
             description: Polaris Work Cluster Applications
             sourceRepos:
               - "https://github.com/Eurac-Research-Institute-for-EO/polaris"
+              - "https://github.com/Eurac-Research-Institute-for-EO/charts"
             destinations:
               - namespace: "*"
                 server: https://kubernetes.default.svc
