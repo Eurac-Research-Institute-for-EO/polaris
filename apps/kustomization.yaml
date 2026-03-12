@@ -3,5 +3,5 @@ kind: Kustomization
 
 resources:
     - hello-nginx/hello-nginx-app.yaml
-    - openeo-argoworkflows/openeo-argoworkflows-app.yaml
+    - openeo-argoworkflows/openeo-app.yaml
     # - keycloak/keycloak-app.yaml
