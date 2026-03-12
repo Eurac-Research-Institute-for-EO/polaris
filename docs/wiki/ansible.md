@@ -37,25 +37,12 @@ The `tasks` directory contains individual task files that are included in the ma
 
 ## Secrets Management
 
-Sensitive information such as GitHub OAuth client ID and secret are stored using Ansible Vault. Make sure to create and edit the vault file to include these secrets before running the playbook.
+Sensitive information such as Keycloak client secrets, GitHub OAuth tokens, and other credentials should be encrypted using Ansible Vault. You can create a vault file to store these secrets securely. To create a vault file, run the following command:
 
-To use GitHub authentication we create our organization application and generate a client ID and secret. These values are then encrypted using Ansible Vault and stored in the `bootstrap.yaml` file as variables.
-
-In GitHub settings make sure to set the callback URL to `https://<ARGOCD_SERVER_URL>/api/dex/callback` where `<ARGOCD_SERVER_URL>` is the URL of your ArgoCD server.
-
-For example:
-
-- Application name: Polaris ArgoCD (or any name you prefer)
-- Homepage URL: `http://argocd.10.8.244.214.nip.io`
-- Authorization callback URL: `http://argocd.10.8.244.214.nip.io/api/dex/callback`
-
-```sh
-cd ansible
-ansible-vault encrypt_string 'YOUR_CLIENT_ID' --name 'github_oauth_client_id'
-ansible-vault encrypt_string 'YOUR_CLIENT_SECRET' --name 'github_oauth_client_secret'
+```bash
+ansible-vault create secrets.yaml
 ```
 
-Replace the encrypted values in the `bootstrap.yaml` file with the output from the above commands. These are then used in the playbook to create sealed secrets for ArgoCD to enable GitHub authentication.
 
 **Note**: You will be prompted to enter a vault password, to be able to retrieve the values later. If you forget it, just recreate the vault with a new password and update the encrypted values in the `bootstrap.yaml` file.
 

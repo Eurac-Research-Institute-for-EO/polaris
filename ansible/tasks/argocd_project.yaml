@@ -1,0 +1,128 @@
+- name: Create ArgoCD AppProject manifest
+  ansible.builtin.copy:
+      content: |
+          apiVersion: argoproj.io/v1alpha1
+          kind: AppProject
+          metadata:
+            name: polaris
+            namespace: argocd
+          spec:
+            description: Polaris Work Cluster Applications
+            sourceRepos:
+              - "https://github.com/Eurac-Research-Institute-for-EO/polaris"
+            destinations:
+              - namespace: "*"
+                server: https://kubernetes.default.svc
+            clusterResourceWhitelist:
+              - group: "*"
+                kind: "*"
+      dest: /tmp/argocd-appproject.yaml
+      mode: "0644"
+
+- name: Create ArgoCD Application manifest (App of Apps)
+  ansible.builtin.copy:
+      content: |
+          apiVersion: argoproj.io/v1alpha1
+          kind: Application
+          metadata:
+            name: polaris-apps
+            namespace: argocd
+            finalizers:
+              - resources-finalizer.argocd.argoproj.io
+          spec:
+            project: polaris
+            source:
+              repoURL: https://github.com/Eurac-Research-Institute-for-EO/polaris
+              targetRevision: main
+              path: apps
+            destination:
+              server: https://kubernetes.default.svc
+              namespace: argocd
+            syncPolicy:
+              automated:
+                prune: true
+                selfHeal: true
+              syncOptions:
+                - CreateNamespace=true
+      dest: /tmp/argocd-application.yaml
+      mode: "0644"
+
+- name: Apply ArgoCD AppProject
+  ansible.builtin.shell: |
+      kubectl apply -f /tmp/argocd-appproject.yaml
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_project
+  changed_when: "'created' in argocd_project.stdout or 'configured' in argocd_project.stdout"
+
+- name: Apply ArgoCD Application
+  ansible.builtin.shell: |
+      kubectl apply -f /tmp/argocd-application.yaml
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_app
+  changed_when: "'created' in argocd_app.stdout or 'configured' in argocd_app.stdout"
+
+- name: Check GitHub repository accessibility
+  ansible.builtin.uri:
+      url: https://api.github.com/repos/Eurac-Research-Institute-for-EO/polaris
+      method: GET
+      status_code: [200, 404]
+  register: repo_check
+  delegate_to: localhost
+  changed_when: false
+  failed_when: false
+
+- name: Verify repository is public
+  ansible.builtin.debug:
+      msg: "WARNING: Repository appears to be private (status: {{ repo_check.status }}). ArgoCD may need repository credentials configured."
+  when: repo_check.status != 200
+
+- name: Wait for polaris-apps Application to initialize
+  ansible.builtin.shell: |
+      sleep 5
+      kubectl get application polaris-apps -n argocd -o jsonpath='{.status.sync.status}' || echo "pending"
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: app_sync_status
+  changed_when: false
+  failed_when: false
+  retries: 3
+  delay: 5
+
+- name: Check if child applications were created
+  ansible.builtin.shell: |
+      kubectl get applications -n argocd --no-headers | wc -l
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: app_count
+  changed_when: false
+
+- name: Get all Applications status
+  ansible.builtin.shell: |
+      kubectl get applications -n argocd -o custom-columns=NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status,REPO:.spec.source.repoURL --no-headers || echo "No applications found"
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: all_apps_status
+  changed_when: false
+
+- name: Get polaris-apps sync condition details
+  ansible.builtin.shell: |
+      kubectl get application polaris-apps -n argocd -o jsonpath='{.status.conditions}' 2>/dev/null || echo "No conditions"
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: sync_conditions
+  changed_when: false
+
+- name: Display ArgoCD Application information
+  ansible.builtin.debug:
+      msg:
+          - "ArgoCD Applications Deployment Status"
+          - "Total Applications: {{ app_count.stdout }}"
+          - ""
+          - "Applications Status:"
+          - "{{ all_apps_status.stdout_lines }}"
+          - ""
+          - "Polaris-Apps Sync Status: {{ app_sync_status.stdout }}"
+          - "Sync Conditions: {{ sync_conditions.stdout }}"
+          - ""
