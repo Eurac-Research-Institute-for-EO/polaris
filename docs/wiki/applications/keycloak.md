@@ -2,6 +2,8 @@
 
 This guide provides step-by-step instructions for deploying Keycloak as an identity and access management solution in the Polaris cluster.
 
+**NOTE**: *This is a guide covering the provided template for Keycloak. However, at Eurac it is recommended to use the existing internal Keycloak instance. If in any case you want to deploy a new Keycloak instance, please follow the instructions below.*
+
 ## Overview
 
 This deployment includes:

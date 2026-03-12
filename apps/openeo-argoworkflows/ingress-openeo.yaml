@@ -1,21 +1,21 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-    name: hello-nginx
+    name: openeo-argoworkflows
     labels:
-        app: hello-nginx
+        app: openeo-argoworkflows
     annotations:
         traefik.ingress.kubernetes.io/router.entrypoints: web
 spec:
     ingressClassName: traefik
     rules:
-        - host: hello.10.8.244.214.nip.io
+        - host: openeo.10.8.244.214.nip.io
           http:
               paths:
                   - path: /
                     pathType: Prefix
                     backend:
                         service:
-                            name: hello-nginx
+                            name: openeo-argoworkflows
                             port:
                                 number: 80

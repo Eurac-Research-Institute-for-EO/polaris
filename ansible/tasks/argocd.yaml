@@ -1,4 +1,9 @@
-# Ansible tasks for installing ArgoCD
+# Ansible tasks for installing ArgoCD with Keycloak OAuth integration
+# Clean, reproducible flow:
+# 1. Install ArgoCD with basic config via Helm
+# 2. Configure Keycloak OAuth credentials in argocd-secret
+# 3. Restart ArgoCD to apply OAuth configuration
+
 - name: Create ArgoCD namespace
   ansible.builtin.shell: |
       kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
@@ -40,24 +45,17 @@
               server.insecure: true
             cm:
               url: "http://argocd.10.8.244.214.nip.io"
-              dex.config: |
-                connectors:
-                  - type: github
-                    id: github
-                    name: GitHub
-                    config:
-                      clientID: $dex.github.clientId
-                      clientSecret: $dex.github.clientSecret
-                      orgs:
-                        - name: Eurac-Research-Institute-for-EO
+              oidc.config: |
+                name: Keycloak
+                issuer: "https://edp-portal.eurac.edu/auth/realms/edp"
+                clientID: $oidc.keycloak.clientId
+                clientSecret: $oidc.keycloak.clientSecret
+                requestedScopes: ["openid", "profile", "email", "groups"]
+                redirectURI: "http://argocd.10.8.244.214.nip.iomysn/auth/callback"
             rbac:
               policy.csv: |
-            {% for admin in ARGOCD_ADMINS %}
-              g, {{ admin }}, role:admin
-            {% endfor %}
-              g, {{ GITHUB_ORGANIZATION }}:*, role:readonly
+                g, polaris_admins, role:admin
               policy.default: role:readonly
-              scopes: '[email]'
       dest: /tmp/argocd-values.yaml
       mode: "0644"
 
@@ -67,16 +65,66 @@
         --namespace argocd \
         --create-namespace \
         --version {{ ARGOCD_VERSION }} \
-        --values /tmp/argocd-values.yaml \
-        --reset-values
+        --values /tmp/argocd-values.yaml
   environment:
       KUBECONFIG: "{{ kubeconfig_path }}"
   register: argocd_install
   changed_when: "'has been upgraded' in argocd_install.stdout or 'has been installed' in argocd_install.stdout"
 
-- name: Wait for ArgoCD to be ready
+- name: Wait for ArgoCD server to be ready
   ansible.builtin.command: |
       kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
   environment:
       KUBECONFIG: "{{ kubeconfig_path }}"
   changed_when: false
+
+# Configure Keycloak OAuth credentials
+# We update argocd-secret after Helm installation to avoid conflicts
+- name: Check if argocd-secret exists
+  ansible.builtin.command: |
+      kubectl get secret argocd-secret -n argocd
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_secret_check
+  changed_when: false
+  failed_when: false
+
+- name: Update argocd-secret with Keycloak OAuth credentials
+  ansible.builtin.shell: |
+      kubectl get secret argocd-secret -n argocd -o json | \
+      jq --arg clientId "{{ keycloak_client_id }}" \
+         --arg clientSecret "{{ keycloak_client_secret }}" \
+         '.data["oidc.keycloak.clientId"] = ($clientId | @base64) |
+          .data["oidc.keycloak.clientSecret"] = ($clientSecret | @base64)' | \
+      kubectl apply -f -
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: update_secret
+  changed_when: "'configured' in update_secret.stdout"
+  when: argocd_secret_check.rc == 0
+
+- name: Restart ArgoCD server to apply OAuth configuration
+  ansible.builtin.shell: |
+      kubectl rollout restart deployment/argocd-server -n argocd
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_restart
+  changed_when: true
+  when: update_secret.changed
+
+- name: Wait for ArgoCD server rollout to complete
+  ansible.builtin.command: |
+      kubectl rollout status deployment/argocd-server -n argocd --timeout=300s
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  changed_when: false
+  when: update_secret.changed
+
+- name: Get ArgoCD admin password
+  ansible.builtin.shell: |
+      kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || echo "N/A"
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_admin_password
+  changed_when: false
+  failed_when: false

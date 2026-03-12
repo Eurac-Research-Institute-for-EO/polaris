@@ -2,37 +2,16 @@
 - name: Setup Polaris Cluster
   hosts: polaris
   become: true
+  vars_files:
+      - vars/keycloak_secrets.yaml
   vars:
-      PLAYBOOK_VERSION: "1.1"
-      # Versions of the software components to be installed
+      PLAYBOOK_VERSION: "1.2"
       K3S_VERSION: "v1.35.0+k3s3"
       ARGOCD_VERSION: "9.4.0"
       HELM_VERSION: "v4.1.1"
       SEALED_SECRETS_VERSION: "v0.34.0"
       SEALED_SECRETS_DOWNLOAD: "0.34.0"
       kubeconfig_path: /etc/rancher/k3s/k3s.yaml
-      # Argo CD user setup
-      # GitHub org receives READONLY by default
-      ARGOCD_ADMINS:
-          - juro.zvolensky@gmail.com
-          - yuvvraaj0flying@gmail.com
-      GITHUB_ORGANIZATION: Eurac-Research-Institute-for-EO
-      # GitHub OAuth credentials for ArgoCD (stored securely in Ansible Vault)
-      github_oauth_client_id: !vault |
-          $ANSIBLE_VAULT;1.1;AES256
-          39623530346661616664336166303865623739666533333133646237303934346637386431653735
-          6162316161366462316630623835613563643130393234620a343934363036306337303230313963
-          34303834613462356130343533343539376261386633313066356336333232616139663266613439
-          3636643033613431340a666638646233356661353332323836383033323531393865353261306663
-          32353261326230316135653661316633653166346564306330313230316635376636
-      github_oauth_client_secret: !vault |
-          $ANSIBLE_VAULT;1.1;AES256
-          62306536386232313932313136656333666537636533646661316663663939343437636336303662
-          3361373631306266333133366235616163343634313837620a643330656437373462353637643364
-          39353264306165666262623032323833323136313633306538623638643562326530663830343364
-          3634313963343733630a346362313462666333386334643337663163663936383664656566343132
-          61666430353233363238633366653131343366323939626165636639343430646165313763623138
-          3036326166323139343836626631636235396563623166623763
   tasks:
       - name: Install system dependencies
         ansible.builtin.include_tasks:
@@ -52,6 +31,6 @@
       - name: Install ArgoCD
         ansible.builtin.include_tasks:
             file: tasks/argocd.yaml
-      - name: Configure ArgoCD with GitHub OAuth
+      - name: Create ArgoCD projects and applications
         ansible.builtin.include_tasks:
-            file: tasks/argo_github_auth.yaml
+            file: tasks/argocd_project.yaml
