@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-    name: openeo-argoworkflows-core
+    name: openeo-argoworkflows
     namespace: argocd
 spec:
     project: polaris
