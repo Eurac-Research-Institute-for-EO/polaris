@@ -16,6 +16,6 @@ spec:
                     pathType: Prefix
                     backend:
                         service:
-                            name: openeo-argoworkflows
+                            name: openeo-openeo-argo
                             port:
-                                number: 80
+                                number: 8000
