@@ -2,6 +2,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
     name: openeo-argoworkflows
+    namespace: openeo
     labels:
         app: openeo-argoworkflows
     annotations:
