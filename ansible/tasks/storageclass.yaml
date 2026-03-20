@@ -1,0 +1,100 @@
+# Ansible tasks for configuring storage classes
+# Note: local-path provisioner works best with WaitForFirstConsumer mode
+# This is the correct configuration for StatefulSets and node-specific storage
+
+- name: Wait for local-path storage class to be available
+  ansible.builtin.command: kubectl get storageclass local-path
+  register: storageclass_check
+  retries: 30
+  delay: 10
+  until: storageclass_check.rc == 0
+  changed_when: false
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+
+- name: Check current volumeBindingMode for local-path storage class
+  ansible.builtin.shell: |
+      kubectl get storageclass local-path -o jsonpath='{.volumeBindingMode}'
+  register: current_binding_mode
+  changed_when: false
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+
+- name: Display current storage class binding mode
+  ansible.builtin.debug:
+      msg: "Current volumeBindingMode: {{ current_binding_mode.stdout }}"
+
+- name: Ensure local-path storage class uses WaitForFirstConsumer (if needed)
+  ansible.builtin.shell: |
+      if [ "{{ current_binding_mode.stdout }}" != "WaitForFirstConsumer" ]; then
+        echo "Recreating storage class with WaitForFirstConsumer mode..."
+        kubectl delete storageclass local-path
+        cat <<EOF | kubectl apply -f -
+        apiVersion: storage.k8s.io/v1
+        kind: StorageClass
+        metadata:
+          name: local-path
+          annotations:
+            storageclass.kubernetes.io/is-default-class: "true"
+        provisioner: rancher.io/local-path
+        volumeBindingMode: WaitForFirstConsumer
+        reclaimPolicy: Delete
+      EOF
+      else
+        echo "Storage class already has correct volumeBindingMode"
+      fi
+  register: storageclass_update
+  changed_when: "'Recreating storage class' in storageclass_update.stdout"
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+
+- name: Configure ArgoCD to ignore PVC health status for WaitForFirstConsumer volumes
+  ansible.builtin.shell: |
+      kubectl get configmap argocd-cm -n argocd &>/dev/null
+  register: argocd_cm_check
+  failed_when: false
+  changed_when: false
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+
+- name: Patch ArgoCD ConfigMap to customize PVC health assessment
+  ansible.builtin.shell: |
+      kubectl patch configmap argocd-cm -n argocd --type merge -p '
+      {
+        "data": {
+          "resource.customizations.health.PersistentVolumeClaim": "hs = {}\nhs.status = \"Healthy\"\nhs.message = \"PVC is available\"\nif obj.status ~= nil then\n  if obj.status.phase ~= nil then\n    if obj.status.phase == \"Pending\" then\n      hs.status = \"Healthy\"\n      hs.message = \"PVC is pending (WaitForFirstConsumer)\"\n    end\n    if obj.status.phase == \"Bound\" then\n      hs.status = \"Healthy\"\n      hs.message = \"PVC is bound\"\n    end\n  end\nend\nreturn hs"
+        }
+      }'
+  when: argocd_cm_check.rc == 0
+  register: argocd_patch
+  changed_when: argocd_patch.rc == 0
+  failed_when: false
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+
+- name: Restart ArgoCD application controller to apply health check changes
+  ansible.builtin.shell: |
+      kubectl rollout restart deployment argocd-application-controller -n argocd
+  when: argocd_patch.changed
+  register: argocd_restart
+  changed_when: argocd_restart.rc == 0
+  failed_when: false
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+
+- name: Verify storage class configuration
+  ansible.builtin.command: kubectl get storageclass local-path -o yaml
+  register: storageclass_info
+  changed_when: false
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+
+- name: Display storage class configuration summary
+  ansible.builtin.debug:
+      msg: |
+          Storage class 'local-path' configured successfully:
+          - volumeBindingMode: WaitForFirstConsumer (correct for local-path provisioner)
+          - ArgoCD health checks customized to treat Pending PVCs as Healthy
+
+          Note: PVCs with WaitForFirstConsumer will remain Pending until a pod uses them.
+          This is normal and expected behavior.

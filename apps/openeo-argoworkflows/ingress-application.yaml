@@ -1,0 +1,24 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+    name: openeo-ingress
+    namespace: argocd
+spec:
+    project: polaris
+    source:
+        repoURL: https://github.com/Eurac-Research-Institute-for-EO/polaris.git
+        targetRevision: main
+        path: apps/openeo-argoworkflows
+        directory:
+            include: ingress-openeo.yaml
+    destination:
+        name: in-cluster
+        namespace: openeo
+    syncPolicy:
+        automated:
+            prune: true
+            selfHeal: true
+            allowEmpty: false
+        syncOptions:
+            - Validate=true
+            - CreateNamespace=true
