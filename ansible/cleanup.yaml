@@ -29,6 +29,19 @@
         ansible.builtin.debug:
             msg: "Goodbye Polaris! Cleanup Playbook version: {{ PLAYBOOK_VERSION }}"
 
+      - name: Get list of application namespaces managed by ArgoCD
+        ansible.builtin.shell: |
+            export KUBECONFIG={{ kubeconfig_path }}
+            kubectl get applications.argoproj.io -A -o jsonpath='{range .items[*]}{.spec.destination.namespace}{"\n"}{end}' | sort -u
+        register: app_namespaces
+        failed_when: false
+        changed_when: false
+
+      - name: Display namespaces to be cleaned up
+        ansible.builtin.debug:
+            msg: "Will clean up these namespaces: {{ app_namespaces.stdout_lines }}"
+        when: app_namespaces.stdout_lines | length > 0
+
       - name: Remove finalizers from all ArgoCD Applications in all namespaces
         ansible.builtin.shell: |
             export KUBECONFIG={{ kubeconfig_path }}
@@ -107,6 +120,81 @@
             export KUBECONFIG={{ kubeconfig_path }}
             kubectl delete crd sealedsecrets.bitnami.com --ignore-not-found=true || true
 
+      - name: Delete all Helm releases in application namespaces
+        ansible.builtin.shell: |
+            export KUBECONFIG={{ kubeconfig_path }}
+            for ns in {{ app_namespaces.stdout_lines | join(' ') }}; do
+              if kubectl get namespace $ns &>/dev/null; then
+                echo "Uninstalling Helm releases in namespace: $ns"
+                for release in $(helm list -n $ns -q 2>/dev/null || true); do
+                  echo "  Uninstalling release: $release"
+                  helm uninstall $release -n $ns --timeout 2m || true
+                done
+              fi
+            done
+        when: app_namespaces.stdout_lines | length > 0
+
+      - name: Remove finalizers from all PVCs in application namespaces
+        ansible.builtin.shell: |
+            export KUBECONFIG={{ kubeconfig_path }}
+            for ns in {{ app_namespaces.stdout_lines | join(' ') }}; do
+              if kubectl get namespace $ns &>/dev/null; then
+                echo "Removing PVC finalizers in namespace: $ns"
+                for pvc in $(kubectl get pvc -n $ns -o name 2>/dev/null || true); do
+                  echo "  Removing finalizers from $pvc"
+                  kubectl patch $pvc -n $ns --type merge -p '{"metadata":{"finalizers":[]}}' || true
+                done
+              fi
+            done
+        when: app_namespaces.stdout_lines | length > 0
+
+      - name: Delete all PVCs in application namespaces
+        ansible.builtin.shell: |
+            export KUBECONFIG={{ kubeconfig_path }}
+            for ns in {{ app_namespaces.stdout_lines | join(' ') }}; do
+              if kubectl get namespace $ns &>/dev/null; then
+                echo "Deleting PVCs in namespace: $ns"
+                kubectl delete pvc --all -n $ns --timeout=60s --ignore-not-found=true || true
+              fi
+            done
+        when: app_namespaces.stdout_lines | length > 0
+
+      - name: Delete all PVs
+        ansible.builtin.shell: |
+            export KUBECONFIG={{ kubeconfig_path }}
+            echo "Removing finalizers from all PVs"
+            for pv in $(kubectl get pv -o name 2>/dev/null || true); do
+              kubectl patch $pv --type merge -p '{"metadata":{"finalizers":[]}}' || true
+            done
+            echo "Deleting all PVs"
+            kubectl delete pv --all --timeout=60s --ignore-not-found=true || true
+
+      - name: Force delete application namespaces
+        ansible.builtin.shell: |
+            export KUBECONFIG={{ kubeconfig_path }}
+            for ns in {{ app_namespaces.stdout_lines | join(' ') }}; do
+              if kubectl get namespace $ns &>/dev/null; then
+                echo "Deleting namespace: $ns"
+                kubectl delete namespace $ns --timeout=60s --ignore-not-found=true || true
+                # If it hangs, force delete by removing finalizers
+                kubectl patch namespace $ns --type merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+              fi
+            done
+        when: app_namespaces.stdout_lines | length > 0
+
+      - name: Wait for application namespaces to be deleted
+        ansible.builtin.shell: |
+            export KUBECONFIG={{ kubeconfig_path }}
+            timeout=60
+            for ns in {{ app_namespaces.stdout_lines | join(' ') }}; do
+              while kubectl get namespace $ns 2>/dev/null && [ $timeout -gt 0 ]; do
+                echo "Waiting for namespace $ns to be deleted... ($timeout seconds left)"
+                sleep 2
+                timeout=$((timeout-2))
+              done
+            done
+        when: app_namespaces.stdout_lines | length > 0
+
       - name: Clean up temporary files
         ansible.builtin.file:
             path: "{{ item }}"
@@ -142,6 +230,8 @@
                 Cleanup completed successfully!
                 - ArgoCD removed
                 - Sealed Secrets removed
+                - All application namespaces deleted: {{ app_namespaces.stdout_lines | join(', ') if app_namespaces.stdout_lines | length > 0 else 'none' }}
+                - All PVCs and PVs removed
                 - All CRDs cleaned up
                 - Temporary files removed
                 You can now run bootstrap.yaml to reinstall the cluster.

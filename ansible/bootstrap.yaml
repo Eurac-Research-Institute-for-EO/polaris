@@ -19,6 +19,9 @@
       - name: Install k3s
         ansible.builtin.include_tasks:
             file: tasks/k3s.yaml
+      - name: Configure storage classes
+        ansible.builtin.include_tasks:
+            file: tasks/storageclass.yaml
       - name: Configure CoreDNS
         ansible.builtin.include_tasks:
             file: tasks/coredns.yaml

@@ -84,12 +84,7 @@ spec:
     destination:
         name: in-cluster
         namespace: openeo
-    ignoreDifferences:
-        - group: ""
-          kind: PersistentVolumeClaim
-          name: openeo-workspace
-          jsonPointers:
-              - /status
+
     syncPolicy:
         automated:
             prune: true
