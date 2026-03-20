@@ -3,4 +3,4 @@ kind: Kustomization
 
 resources:
     - helm-openeo-argoworkflows.yaml
-    - ingress-openeo.yaml
+    - ingress-application.yaml
