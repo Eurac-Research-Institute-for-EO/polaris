@@ -13,7 +13,7 @@ spec:
         - host: openeo.10.8.244.214.nip.io
           http:
               paths:
-                  - path: /
+                  - path: /openeo
                     pathType: Prefix
                     backend:
                         service:
