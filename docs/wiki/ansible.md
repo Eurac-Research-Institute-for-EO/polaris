@@ -53,5 +53,5 @@ These encrypted values are safe to commit.
 To run the Ansible playbook, navigate to the `ansible` directory and execute the following command:
 
 ```bash
-ansible-playbook -i inventory.ini bootstrap.yaml --ask-become-pass --ask-vault-pass
+ansible-playbook -i inventory.ini bootstrap.yaml --ask-become-pass
 ```

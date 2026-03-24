@@ -1,9 +1,14 @@
 # Ansible playbook to bootstrap the Polaris cluster with k3s, ArgoCD, and Sealed Secrets.
+#
+# Usage:
+#   1. Copy and edit config: cp vars/cluster_secrets.example.yaml vars/cluster_secrets.yaml
+#   2. Run: ansible-playbook -i inventory bootstrap.yaml
+#
 - name: Setup Polaris Cluster
   hosts: polaris
   become: true
   vars_files:
-      - vars/keycloak_secrets.yaml
+      - vars/cluster_secrets.yaml
   vars:
       PLAYBOOK_VERSION: "1.2"
       K3S_VERSION: "v1.35.0+k3s3"
@@ -31,6 +36,9 @@
       - name: Install Sealed Secrets
         ansible.builtin.include_tasks:
             file: tasks/sealed_secrets.yaml
+      - name: Process cluster secrets and generate SealedSecrets
+        ansible.builtin.include_tasks:
+            file: tasks/cluster_secrets.yaml
       - name: Install ArgoCD
         ansible.builtin.include_tasks:
             file: tasks/argocd.yaml

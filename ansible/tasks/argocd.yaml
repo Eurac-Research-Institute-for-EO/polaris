@@ -38,24 +38,24 @@
               ingressClassName: traefik
               annotations:
                 traefik.ingress.kubernetes.io/router.entrypoints: web
-              hostname: argocd.10.8.244.214.nip.io
+              hostname: argocd.{{ config.cluster.domain }}
 
           configs:
             params:
               server.insecure: true
             cm:
-              url: "http://argocd.10.8.244.214.nip.io"
+              url: "http://argocd.{{ config.cluster.domain }}"
               oidc.config: |
-                name: Keycloak
-                issuer: "https://edp-portal.eurac.edu/auth/realms/edp"
+                name: {{ config.argocd.oidc.name }}
+                issuer: "{{ config.argocd.oidc.issuer }}"
                 clientID: $oidc.keycloak.clientId
                 clientSecret: $oidc.keycloak.clientSecret
-                requestedScopes: ["openid", "profile", "email", "groups"]
-                redirectURI: "http://argocd.10.8.244.214.nip.iomysn/auth/callback"
+                requestedScopes: {{ config.argocd.oidc.requested_scopes | to_json }}
+                redirectURI: "http://argocd.{{ config.cluster.domain }}/auth/callback"
             rbac:
               policy.csv: |
-                g, polaris_admins, role:admin
-              policy.default: role:readonly
+                g, {{ config.argocd.rbac.admin_group }}, role:admin
+              policy.default: {{ config.argocd.rbac.default_role }}
       dest: /tmp/argocd-values.yaml
       mode: "0644"
 
@@ -128,3 +128,25 @@
   register: argocd_admin_password
   changed_when: false
   failed_when: false
+
+- name: Configure ArgoCD to treat Pending PVCs as Healthy (for WaitForFirstConsumer)
+  ansible.builtin.shell: |
+      kubectl patch configmap argocd-cm -n argocd --type merge -p '
+      {
+        "data": {
+          "resource.customizations.health.PersistentVolumeClaim": "hs = {}\nhs.status = \"Healthy\"\nhs.message = \"PVC is available\"\nif obj.status ~= nil then\n  if obj.status.phase ~= nil then\n    if obj.status.phase == \"Pending\" then\n      hs.status = \"Healthy\"\n      hs.message = \"PVC is pending (WaitForFirstConsumer)\"\n    end\n    if obj.status.phase == \"Bound\" then\n      hs.status = \"Healthy\"\n      hs.message = \"PVC is bound\"\n    end\n  end\nend\nreturn hs"
+        }
+      }'
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_pvc_patch
+  changed_when: argocd_pvc_patch.rc == 0
+
+- name: Restart ArgoCD application controller to apply PVC health check changes
+  ansible.builtin.shell: |
+      kubectl rollout restart statefulset argocd-application-controller -n argocd
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  when: argocd_pvc_patch.changed
+  register: argocd_controller_restart
+  changed_when: argocd_controller_restart.rc == 0
