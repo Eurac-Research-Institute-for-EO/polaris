@@ -27,14 +27,9 @@ theme:
 
 nav:
     - Home: index.md
-    - Overview: overview.md
-    - Cluster Setup:
-          - Ansible: ansible.md
-          - Deployment: deployment.md
-          - Uninstall: uninstall.md
-    - Applications:
-          - Hello Nginx: applications/hello-nginx.md
-          - Keycloak: applications/keycloak.md
+    - Install: installation.md
+    - Uninstall: uninstall.md
+    - Secrets: secrets.md
 
 markdown_extensions:
     - pymdownx.highlight:

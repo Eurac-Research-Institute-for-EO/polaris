@@ -24,9 +24,9 @@ spec:
                         oidcOrganisation: "eurac-keycloak"
                         oidcProviderTitle: "EURAC Keycloak"
                         oidcPolicies: ""
-                        stacCatalogueUrl: "https://stac.eodc.eu/api/v1"
+                        stacCatalogueUrl: "https://stac.eurac.edu/"
                         workspaceRoot: "/user_workspaces"
-                        executorImage: "yuvraj1989/openeo-argoworkflows-api:eurac-custom-oidc"
+                        executorImage: "ghcr.io/eurac-research-institute-for-eo/openeo-argoworkflows-executor:d6771b1"
                         daskWorkerCores: "4"
                         daskWorkerMemory: "8"
                         daskWorkerLimit: "6"
@@ -35,9 +35,9 @@ spec:
                 replicaCount: 1
 
                 image:
-                    repository: yuvraj1989/openeo-argoworkflows-api
+                    repository: ghcr.io/eurac-research-institute-for-eo/openeo-argoworkflows-api
                     pullPolicy: Always
-                    tag: "eurac-custom-oidc-v3"
+                    tag: "latest"
 
                 postgresql:
                     enabled: true
@@ -65,6 +65,9 @@ spec:
 
                 ingress:
                     enabled: true
+                    hosts:
+                        - host: openeo.10.8.244.214.nip.io
+                          paths: /
 
                 resources:
                     limits:

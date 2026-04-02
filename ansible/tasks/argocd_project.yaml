@@ -4,19 +4,24 @@
           apiVersion: argoproj.io/v1alpha1
           kind: AppProject
           metadata:
-            name: polaris
+            name: {{ argocd.project.name }}
             namespace: argocd
           spec:
-            description: Polaris Work Cluster Applications
+            description: {{ argocd.project.description }}
             sourceRepos:
-              - "https://github.com/Eurac-Research-Institute-for-EO/polaris"
-              - "https://github.com/Eurac-Research-Institute-for-EO/charts"
+          {% for repo in argocd.project.source_repos %}
+              - "{{ repo }}"
+          {% endfor %}
             destinations:
-              - namespace: "*"
-                server: https://kubernetes.default.svc
+          {% for dest in argocd.project.destinations %}
+              - namespace: "{{ dest.namespace }}"
+                server: {{ dest.server }}
+          {% endfor %}
             clusterResourceWhitelist:
-              - group: "*"
-                kind: "*"
+          {% for resource in argocd.project.cluster_resource_whitelist %}
+              - group: "{{ resource.group }}"
+                kind: "{{ resource.kind }}"
+          {% endfor %}
       dest: /tmp/argocd-appproject.yaml
       mode: "0644"
 
@@ -26,25 +31,27 @@
           apiVersion: argoproj.io/v1alpha1
           kind: Application
           metadata:
-            name: polaris-apps
+            name: {{ argocd.app_of_apps.name }}
             namespace: argocd
             finalizers:
               - resources-finalizer.argocd.argoproj.io
           spec:
-            project: polaris
+            project: {{ argocd.project.name }}
             source:
-              repoURL: https://github.com/Eurac-Research-Institute-for-EO/polaris
-              targetRevision: main
-              path: apps
+              repoURL: {{ argocd.app_of_apps.repo_url }}
+              targetRevision: {{ argocd.app_of_apps.target_revision }}
+              path: {{ argocd.app_of_apps.path }}
             destination:
-              server: https://kubernetes.default.svc
+              server: {{ argocd.project.destinations[0].server }}
               namespace: argocd
             syncPolicy:
               automated:
-                prune: true
-                selfHeal: true
+                prune: {{ argocd.app_of_apps.sync_policy.automated.prune | lower }}
+                selfHeal: {{ argocd.app_of_apps.sync_policy.automated.self_heal | lower }}
               syncOptions:
-                - CreateNamespace=true
+          {% for option in argocd.app_of_apps.sync_policy.sync_options %}
+                - {{ option }}
+          {% endfor %}
       dest: /tmp/argocd-application.yaml
       mode: "0644"
 
@@ -64,25 +71,34 @@
   register: argocd_app
   changed_when: "'created' in argocd_app.stdout or 'configured' in argocd_app.stdout"
 
+- name: Extract repository owner and name from URL
+  ansible.builtin.set_fact:
+      repo_api_url: "{{ argocd.app_of_apps.repo_url | regex_replace('https://github.com/', 'https://api.github.com/repos/') }}"
+  when: "'github.com' in argocd.app_of_apps.repo_url"
+
 - name: Check GitHub repository accessibility
   ansible.builtin.uri:
-      url: https://api.github.com/repos/Eurac-Research-Institute-for-EO/polaris
+      url: "{{ repo_api_url }}"
       method: GET
       status_code: [200, 404]
   register: repo_check
   delegate_to: localhost
   changed_when: false
   failed_when: false
+  when: "'github.com' in argocd.app_of_apps.repo_url"
 
 - name: Verify repository is public
   ansible.builtin.debug:
       msg: "WARNING: Repository appears to be private (status: {{ repo_check.status }}). ArgoCD may need repository credentials configured."
-  when: repo_check.status != 200
+  when:
+      - "'github.com' in argocd.app_of_apps.repo_url"
+      - repo_check.status is defined
+      - repo_check.status != 200
 
-- name: Wait for polaris-apps Application to initialize
+- name: Wait for {{ argocd.app_of_apps.name }} Application to initialize
   ansible.builtin.shell: |
       sleep 5
-      kubectl get application polaris-apps -n argocd -o jsonpath='{.status.sync.status}' || echo "pending"
+      kubectl get application {{ argocd.app_of_apps.name }} -n argocd -o jsonpath='{.status.sync.status}' || echo "pending"
   environment:
       KUBECONFIG: "{{ kubeconfig_path }}"
   register: app_sync_status
@@ -107,9 +123,9 @@
   register: all_apps_status
   changed_when: false
 
-- name: Get polaris-apps sync condition details
+- name: Get {{ argocd.app_of_apps.name }} sync condition details
   ansible.builtin.shell: |
-      kubectl get application polaris-apps -n argocd -o jsonpath='{.status.conditions}' 2>/dev/null || echo "No conditions"
+      kubectl get application {{ argocd.app_of_apps.name }} -n argocd -o jsonpath='{.status.conditions}' 2>/dev/null || echo "No conditions"
   environment:
       KUBECONFIG: "{{ kubeconfig_path }}"
   register: sync_conditions
@@ -119,11 +135,13 @@
   ansible.builtin.debug:
       msg:
           - "ArgoCD Applications Deployment Status"
+          - "Project: {{ argocd.project.name }}"
+          - "App of Apps: {{ argocd.app_of_apps.name }}"
           - "Total Applications: {{ app_count.stdout }}"
           - ""
           - "Applications Status:"
           - "{{ all_apps_status.stdout_lines }}"
           - ""
-          - "Polaris-Apps Sync Status: {{ app_sync_status.stdout }}"
+          - "{{ argocd.app_of_apps.name }} Sync Status: {{ app_sync_status.stdout }}"
           - "Sync Conditions: {{ sync_conditions.stdout }}"
           - ""
