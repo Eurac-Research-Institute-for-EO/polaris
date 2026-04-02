@@ -22,6 +22,9 @@ spec:
 
                 promtail:
                   enabled: true
+                  config:
+                    clients:
+                      - url: http://monitoring-loki:3100/loki/api/v1/push
 
                 fluent-bit:
                   enabled: false
