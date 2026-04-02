@@ -9,7 +9,7 @@ In case we need to only update the secrets in an existing instance, we can use t
 The playbook is located in the `ansible` directory and can be run with the following command:
 
 ```bash
-ansible-playbook -i inventory secrets.yaml
+ansible-playbook -i inventory secrets.yaml --ask-become-pass
 ```
 
 The Pods will not automatically update with the new secrets, so we need to restart the Pods to apply the changes. We can do this by deleting the Pods, and they will be recreated with the new secrets.
