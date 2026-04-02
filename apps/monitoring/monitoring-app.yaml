@@ -1,0 +1,104 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+    name: monitoring
+    namespace: argocd
+    finalizers:
+        - resources-finalizer.argocd.argoproj.io
+spec:
+    project: polaris
+    source:
+        chart: loki-stack
+        repoURL: https://grafana.github.io/helm-charts
+        targetRevision: 2.9.10
+        helm:
+            releaseName: monitoring
+            values: |
+                loki:
+                  enabled: true
+                  persistence:
+                    enabled: true
+                    size: 10Gi
+
+                promtail:
+                  enabled: true
+
+                fluent-bit:
+                  enabled: false
+
+                grafana:
+                  enabled: true
+
+                  # Admin credentials are sourced from the grafana-credentials secret
+                  # created by ansible/tasks/cluster_secrets.yaml - never commit plaintext here
+                  admin:
+                    existingSecret: grafana-credentials
+                    userKey: admin-user
+                    passwordKey: admin-password
+
+                  # Mounts grafana-credentials as env vars on the Grafana pod so that
+                  # grafana.ini can reference secrets via $__env{} interpolation
+                  envFromSecrets:
+                    - name: grafana-credentials
+
+                  grafana.ini:
+                    server:
+                      root_url: "http://grafana.10.8.244.214.nip.io"
+                      domain: "grafana.10.8.244.214.nip.io"
+
+                    # -- Keycloak OIDC --
+                    auth.generic_oauth:
+                      enabled: true
+                      name: Keycloak
+                      allow_sign_up: true
+                      auto_login: false
+                      client_id: grafana
+                      client_secret: $__env{GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET}
+                      scopes: openid email profile roles
+                      auth_url: https://edp-portal.eurac.edu/auth/realms/edp/protocol/openid-connect/auth
+                      token_url: https://edp-portal.eurac.edu/auth/realms/edp/protocol/openid-connect/token
+                      api_url: https://edp-portal.eurac.edu/auth/realms/edp/protocol/openid-connect/userinfo
+                      role_attribute_path: "contains(roles[*], 'admin') && 'Admin' || contains(roles[*], 'editor') && 'Editor' || 'Viewer'"
+                      use_pkce: true
+
+                  # Ingress is handled by ingress-grafana.yaml to match polaris conventions
+                  ingress:
+                    enabled: false
+
+                  # Loki is deployed in the same namespace - service name follows
+                  # helm fullname convention: {releaseName}-loki
+                  additionalDataSources:
+                    - name: Loki
+                      type: loki
+                      url: http://monitoring-loki:3100
+                      access: proxy
+                      isDefault: true
+                      editable: true
+
+                  persistence:
+                    enabled: true
+                    size: 5Gi
+
+                prometheus:
+                  enabled: false
+
+                filebeat:
+                  enabled: false
+
+                logstash:
+                  enabled: false
+
+    destination:
+        server: https://kubernetes.default.svc
+        namespace: monitoring
+
+    syncPolicy:
+        automated:
+            prune: true
+            selfHeal: true
+            allowEmpty: false
+        syncOptions:
+            - Validate=true
+            - CreateNamespace=true
+            - PrunePropagationPolicy=foreground
+            - PruneLast=true
