@@ -67,7 +67,8 @@ spec:
                     enabled: true
                     hosts:
                         - host: openeo.10.8.244.214.nip.io
-                          paths: /
+                          paths:
+                              - /
 
                 resources:
                     limits:
