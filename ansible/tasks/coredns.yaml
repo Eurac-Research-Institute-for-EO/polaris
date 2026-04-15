@@ -1,5 +1,13 @@
 # Ansible tasks for configuring CoreDNS
-# Required DNS bypass to use HTTPS in Pods
+# Required DNS fix to allow pods to reach external OIDC providers (e.g. edp-portal.eurac.edu)
+#
+# WHY HelmChartConfig instead of a direct ConfigMap patch:
+#   k3s manages CoreDNS through its built-in Helm controller. On every k3s restart
+#   (reboot, service restart, upgrade) the controller reconciles the CoreDNS HelmChart
+#   and overwrites any manually applied ConfigMap changes. A HelmChartConfig is stored
+#   in etcd and is merged by the Helm controller on each reconcile, making the custom
+#   Corefile persistent across k3s restarts.
+
 - name: Wait for CoreDNS deployment to be available
   ansible.builtin.shell: |
       kubectl --kubeconfig {{ kubeconfig_path }} wait --namespace kube-system \
@@ -11,19 +19,47 @@
   delay: 10
   until: coredns_wait.rc == 0
 
-- name: Get current CoreDNS ConfigMap
-  ansible.builtin.shell: |
-      kubectl --kubeconfig {{ kubeconfig_path }} get configmap coredns -n kube-system -o yaml
-  register: coredns_configmap
-  changed_when: false
-
-- name: Backup original CoreDNS ConfigMap
+- name: Apply CoreDNS HelmChartConfig (persistent across k3s restarts)
   ansible.builtin.copy:
-      content: "{{ coredns_configmap.stdout }}"
-      dest: /tmp/coredns-configmap-backup.yaml
+      content: |
+          apiVersion: helm.cattle.io/v1
+          kind: HelmChartConfig
+          metadata:
+            name: coredns
+            namespace: kube-system
+          spec:
+            valuesContent: |-
+              customConfig: |
+                .:53 {
+                    errors
+                    health {
+                        lameduck 5s
+                    }
+                    ready
+                    kubernetes cluster.local in-addr.arpa ip6.arpa {
+                        pods insecure
+                        fallthrough in-addr.arpa ip6.arpa
+                        ttl 30
+                    }
+                    prometheus :9153
+                    forward . 1.1.1.1 8.8.8.8
+                    cache 30
+                    loop
+                    reload
+                    loadbalance
+                }
+      dest: /tmp/coredns-helmchartconfig.yaml
       mode: "0644"
 
-- name: Create custom CoreDNS ConfigMap
+- name: Apply CoreDNS HelmChartConfig to cluster
+  ansible.builtin.shell: |
+      kubectl --kubeconfig {{ kubeconfig_path }} apply -f /tmp/coredns-helmchartconfig.yaml
+  register: coredns_helmchartconfig_apply
+  changed_when: "'configured' in coredns_helmchartconfig_apply.stdout or 'created' in coredns_helmchartconfig_apply.stdout"
+
+# Also patch the ConfigMap directly so changes take effect immediately without
+# waiting for the Helm controller to re-render the chart on the next reconcile.
+- name: Create custom CoreDNS ConfigMap (immediate effect)
   ansible.builtin.copy:
       content: |
           apiVersion: v1
@@ -57,26 +93,36 @@
 - name: Apply custom CoreDNS ConfigMap
   ansible.builtin.shell: |
       kubectl --kubeconfig {{ kubeconfig_path }} apply -f /tmp/coredns-configmap.yaml
-  register: coredns_apply
-  changed_when: "'configured' in coredns_apply.stdout or 'created' in coredns_apply.stdout"
+  register: coredns_configmap_apply
+  changed_when: "'configured' in coredns_configmap_apply.stdout or 'created' in coredns_configmap_apply.stdout"
 
 - name: Restart CoreDNS pods to apply changes
   ansible.builtin.shell: |
       kubectl --kubeconfig {{ kubeconfig_path }} rollout restart deployment/coredns -n kube-system
-  when: coredns_apply.changed
+  when: coredns_configmap_apply.changed or coredns_helmchartconfig_apply.changed
 
 - name: Wait for CoreDNS rollout to complete
   ansible.builtin.shell: |
       kubectl --kubeconfig {{ kubeconfig_path }} rollout status deployment/coredns -n kube-system --timeout=300s
-  when: coredns_apply.changed
+  when: coredns_configmap_apply.changed or coredns_helmchartconfig_apply.changed
   changed_when: false
 
-- name: Verify CoreDNS configuration
+- name: Verify CoreDNS Corefile in ConfigMap
   ansible.builtin.shell: |
       kubectl --kubeconfig {{ kubeconfig_path }} get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}'
   register: coredns_verify
   changed_when: false
 
-- name: Display CoreDNS configuration
+- name: Verify CoreDNS HelmChartConfig exists
+  ansible.builtin.shell: |
+      kubectl --kubeconfig {{ kubeconfig_path }} get helmchartconfig coredns -n kube-system -o jsonpath='{.spec.valuesContent}'
+  register: coredns_helmchartconfig_verify
+  changed_when: false
+
+- name: Display active CoreDNS Corefile
   ansible.builtin.debug:
       msg: "{{ coredns_verify.stdout }}"
+
+- name: Display CoreDNS HelmChartConfig values
+  ansible.builtin.debug:
+      msg: "{{ coredns_helmchartconfig_verify.stdout }}"
