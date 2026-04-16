@@ -8,43 +8,81 @@ metadata:
 spec:
     project: polaris
     source:
-        chart: loki-stack
+        chart: loki
         repoURL: https://grafana.github.io/helm-charts
-        targetRevision: 2.9.10
+        # https://github.com/grafana/helm-charts/releases?q=loki
+        # Aligned with EOEPCA reference (https://github.com/EOEPCA/eoepca-plus)
+        targetRevision: 6.55.0
         helm:
             releaseName: loki
             values: |
-                # releaseName=loki -> Loki service name = loki-loki
-                # Promtail pushes to http://loki-loki:3100
-                # Grafana datasource is configured in monitoring-app.yaml (kube-prometheus-stack)
+                # SingleBinary mode: one pod, suitable for small/dev clusters.
+                deploymentMode: SingleBinary
+
                 loki:
-                  enabled: true
+                  auth_enabled: false
+                  commonConfig:
+                    replication_factor: 1
+
+                  # schemaConfig is required in loki chart >= 6.x
+                  schemaConfig:
+                    configs:
+                      - from: "2024-01-01"
+                        store: tsdb
+                        object_store: filesystem
+                        schema: v13
+                        index:
+                          prefix: loki_index_
+                          period: 24h
+
+                  storage:
+                    type: filesystem
+
+                  limits_config:
+                    retention_period: 168h
+
+                  compactor:
+                    retention_enabled: true
+                    # delete_request_store is required when retention_enabled=true;
+                    # must match the object_store in schemaConfig
+                    delete_request_store: filesystem
+                    retention_delete_delay: 2h
+                    compaction_interval: 10m
+
+                singleBinary:
+                  replicas: 1
                   persistence:
                     enabled: true
                     size: 10Gi
 
-                promtail:
-                  enabled: true
-                  config:
-                    clients:
-                      - url: http://loki-loki:3100/loki/api/v1/push
+                # Disable all distributed-mode components
+                read:
+                  replicas: 0
+                write:
+                  replicas: 0
+                backend:
+                  replicas: 0
 
-                # Grafana is managed by the monitoring (kube-prometheus-stack) app -- disabled here
-                # to avoid a second Grafana instance
-                grafana:
+                # Disable in-memory caches (no memcached in this setup)
+                chunksCache:
+                  enabled: false
+                resultsCache:
                   enabled: false
 
-                fluent-bit:
+                # Disable bundled gateway, test, and canary components
+                gateway:
+                  enabled: false
+                test:
+                  enabled: false
+                lokiCanary:
                   enabled: false
 
-                prometheus:
-                  enabled: false
-
-                filebeat:
-                  enabled: false
-
-                logstash:
-                  enabled: false
+                # Wire up a ServiceMonitor so kube-prometheus-stack can scrape Loki
+                monitoring:
+                  serviceMonitor:
+                    enabled: true
+                    additionalLabels:
+                      release: monitoring
 
     destination:
         server: https://kubernetes.default.svc
