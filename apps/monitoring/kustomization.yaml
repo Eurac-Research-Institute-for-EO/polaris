@@ -4,4 +4,5 @@ kind: Kustomization
 resources:
     - monitoring-app.yaml
     - loki-app.yaml
+    - alloy-app.yaml
     - ingress-grafana.yaml
