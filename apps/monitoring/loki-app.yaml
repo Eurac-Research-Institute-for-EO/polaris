@@ -1,0 +1,62 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+    name: loki
+    namespace: argocd
+    finalizers:
+        - resources-finalizer.argocd.argoproj.io
+spec:
+    project: polaris
+    source:
+        chart: loki-stack
+        repoURL: https://grafana.github.io/helm-charts
+        targetRevision: 2.9.10
+        helm:
+            releaseName: loki
+            values: |
+                # releaseName=loki -> Loki service name = loki-loki
+                # Promtail pushes to http://loki-loki:3100
+                # Grafana datasource is configured in monitoring-app.yaml (kube-prometheus-stack)
+                loki:
+                  enabled: true
+                  persistence:
+                    enabled: true
+                    size: 10Gi
+
+                promtail:
+                  enabled: true
+                  config:
+                    clients:
+                      - url: http://loki-loki:3100/loki/api/v1/push
+
+                # Grafana is managed by the monitoring (kube-prometheus-stack) app -- disabled here
+                # to avoid a second Grafana instance
+                grafana:
+                  enabled: false
+
+                fluent-bit:
+                  enabled: false
+
+                prometheus:
+                  enabled: false
+
+                filebeat:
+                  enabled: false
+
+                logstash:
+                  enabled: false
+
+    destination:
+        server: https://kubernetes.default.svc
+        namespace: monitoring
+
+    syncPolicy:
+        automated:
+            prune: true
+            selfHeal: true
+            allowEmpty: false
+        syncOptions:
+            - Validate=true
+            - CreateNamespace=true
+            - PrunePropagationPolicy=foreground
+            - PruneLast=true

@@ -3,4 +3,5 @@ kind: Kustomization
 
 resources:
     - monitoring-app.yaml
+    - loki-app.yaml
     - ingress-grafana.yaml
