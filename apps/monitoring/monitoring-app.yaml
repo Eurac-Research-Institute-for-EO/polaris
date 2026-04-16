@@ -8,27 +8,15 @@ metadata:
 spec:
     project: polaris
     source:
-        chart: loki-stack
-        repoURL: https://grafana.github.io/helm-charts
-        targetRevision: 2.9.10
+        chart: kube-prometheus-stack
+        repoURL: https://prometheus-community.github.io/helm-charts
+        targetRevision: 83.5.0
         helm:
             releaseName: monitoring
             values: |
-                loki:
-                  enabled: true
-                  persistence:
-                    enabled: true
-                    size: 10Gi
-
-                promtail:
-                  enabled: true
-                  config:
-                    clients:
-                      - url: http://monitoring-loki:3100/loki/api/v1/push
-
-                fluent-bit:
-                  enabled: false
-
+                # -- Grafana ---------------------------------------------------------
+                # releaseName=monitoring -> service name = monitoring-grafana
+                # (matches ingress-grafana.yaml backend with no changes needed)
                 grafana:
                   enabled: true
 
@@ -62,7 +50,6 @@ spec:
                       token_url: https://edp-portal.eurac.edu/auth/realms/edp/protocol/openid-connect/token
                       api_url: https://edp-portal.eurac.edu/auth/realms/edp/protocol/openid-connect/userinfo
                       # Keycloak sends groups with a leading slash e.g. '/polaris_admins'.
-                      # This mirrors the ArgoCD admin group (argocd.rbac.admin_group: polaris_admins).
                       # Ensure the Keycloak client has a 'Group Membership' mapper configured.
                       role_attribute_path: "contains(groups[*], 'polaris_admins') && 'Admin' || 'Viewer'"
                       use_pkce: true
@@ -71,28 +58,57 @@ spec:
                   ingress:
                     enabled: false
 
-                  # Loki is deployed in the same namespace - service name follows
-                  # helm fullname convention: {releaseName}-loki
+                  # Loki is deployed as a separate ArgoCD app (loki-app.yaml).
+                  # releaseName=loki -> service name = loki-loki
+                  # Prometheus datasource is auto-provisioned by kube-prometheus-stack.
                   additionalDataSources:
                     - name: Loki
                       type: loki
-                      url: http://monitoring-loki:3100
+                      url: http://loki-loki:3100
                       access: proxy
-                      isDefault: true
+                      isDefault: false
                       editable: true
 
                   persistence:
                     enabled: true
                     size: 5Gi
 
+                # -- Prometheus ------------------------------------------------------
                 prometheus:
-                  enabled: false
+                  enabled: true
+                  prometheusSpec:
+                    retention: 30d
+                    storageSpec:
+                      volumeClaimTemplate:
+                        spec:
+                          accessModes: ["ReadWriteOnce"]
+                          resources:
+                            requests:
+                              storage: 20Gi
 
-                filebeat:
-                  enabled: false
+                # -- Alertmanager ----------------------------------------------------
+                alertmanager:
+                  enabled: true
+                  alertmanagerSpec:
+                    storage:
+                      volumeClaimTemplate:
+                        spec:
+                          accessModes: ["ReadWriteOnce"]
+                          resources:
+                            requests:
+                              storage: 2Gi
 
-                logstash:
-                  enabled: false
+                # -- Node Exporter (per-node hardware/OS metrics) --------------------
+                nodeExporter:
+                  enabled: true
+
+                # -- kube-state-metrics (Kubernetes object state metrics) ------------
+                kubeStateMetrics:
+                  enabled: true
+
+                # -- Prometheus Operator ---------------------------------------------
+                prometheusOperator:
+                  enabled: true
 
     destination:
         server: https://kubernetes.default.svc
