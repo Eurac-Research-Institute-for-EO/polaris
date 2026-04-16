@@ -58,10 +58,22 @@ spec:
                   ingress:
                     enabled: false
 
-                  # Loki is deployed as a separate ArgoCD app (loki-app.yaml).
-                  # releaseName=loki -> service name = loki-loki
-                  # Prometheus datasource is auto-provisioned by kube-prometheus-stack.
+                  # Disable the chart's auto-provisioned default Prometheus datasource.
+                  # In 83.x the sidecar creates multiple ConfigMaps that each declare a default,
+                  # causing Grafana to crash. We manage all datasources explicitly below instead.
+                  sidecar:
+                    datasources:
+                      defaultDatasourceEnabled: false
+
+                  # All datasources declared here. Only Prometheus is isDefault: true.
+                  # prometheus-operated is the stable service name always created by the
+                  # Prometheus Operator, regardless of release name.
                   additionalDataSources:
+                    - name: Prometheus
+                      type: prometheus
+                      url: http://prometheus-operated:9090
+                      isDefault: true
+                      editable: true
                     - name: Loki
                       type: loki
                       url: http://loki-loki:3100
