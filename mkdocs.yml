@@ -30,6 +30,7 @@ nav:
     - Install: installation.md
     - Uninstall: uninstall.md
     - Secrets: secrets.md
+    - Multinode:
 
 markdown_extensions:
     - pymdownx.highlight:

@@ -1,0 +1,64 @@
+# Install ArgoCD via Helm with basic local auth (no OIDC).
+# OIDC and app-of-apps can be layered on later once the cluster is stable.
+- name: Create ArgoCD namespace
+  ansible.builtin.shell: |
+      kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_namespace
+  changed_when: "'created' in argocd_namespace.stdout"
+
+- name: Add ArgoCD Helm repository
+  ansible.builtin.shell: |
+      helm repo list | grep -q '^argo' || helm repo add argo https://argoproj.github.io/argo-helm
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: helm_argo_repo
+  changed_when: "'has been added' in helm_argo_repo.stdout"
+  failed_when: helm_argo_repo.rc != 0
+
+- name: Update Helm repositories
+  ansible.builtin.command: helm repo update
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  changed_when: false
+
+- name: Install ArgoCD via Helm
+  ansible.builtin.shell: |
+      helm upgrade --install argocd argo/argo-cd \
+        --namespace argocd \
+        --create-namespace \
+        --version {{ ARGOCD_VERSION }} \
+        --set server.service.type=ClusterIP \
+        --set configs.params."server\.insecure"=true \
+        --set server.ingress.enabled=true \
+        --set server.ingress.ingressClassName=traefik \
+        --set server.ingress.hostname=argocd.{{ cluster.domain }}
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_install
+  changed_when: "'has been upgraded' in argocd_install.stdout or 'has been installed' in argocd_install.stdout"
+
+- name: Wait for ArgoCD server to be ready
+  ansible.builtin.command: |
+      kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  changed_when: false
+
+- name: Get ArgoCD admin password
+  ansible.builtin.shell: |
+      kubectl get secret argocd-initial-admin-secret -n argocd \
+        -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || echo "N/A"
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_admin_password
+  changed_when: false
+  failed_when: false
+
+- name: Display ArgoCD access info
+  ansible.builtin.debug:
+      msg:
+          - "ArgoCD URL: http://argocd.{{ cluster.domain }}"
+          - "Username: admin"
+          - "Password: {{ argocd_admin_password.stdout }}"
