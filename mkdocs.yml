@@ -18,6 +18,9 @@ theme:
     features:
         - navigation.tabs
         - navigation.top
+        - navigation.indexes
+        - navigation.instant
+        - navigation.footer
         - search.highlight
         - search.suggest
         - toc.integrate
@@ -27,18 +30,29 @@ theme:
 
 nav:
     - Home: index.md
-    - Install: installation.md
-    - Uninstall: uninstall.md
-    - Secrets: secrets.md
-    - Multinode:
-          - Overview: multinode/multinode.md
-          - Prerequisites: multinode/prerequisites.md
-          - SSH & Deployment User: multinode/deployment-user.md
-          - Configuration: multinode/configuration.md
-          - Secrets: multinode/secrets.md
-          - Deploy & Verify: multinode/deployment.md
-          - Operations: multinode/operations.md
-          - Troubleshooting: multinode/troubleshooting.md
+    - Deployment:
+          - deployment.md
+          - Single Node:
+                - single-node.md
+                - Installation: installation.md
+                - Secrets: secrets.md
+                - Uninstall: uninstall.md
+          - Multinode:
+                - multinode/multinode.md
+                - Prerequisites: multinode/prerequisites.md
+                - SSH & Deployment User: multinode/deployment-user.md
+                - Configuration: multinode/configuration.md
+                - Secrets: multinode/secrets.md
+                - Deploy & Verify: multinode/deployment.md
+                - Operations: multinode/operations.md
+                - Troubleshooting: multinode/troubleshooting.md
+
+plugins:
+    - search
+    - git-revision-date-localized:
+          type: date
+          enable_creation_date: false
+          fallback_to_build_date: true
 
 markdown_extensions:
     - pymdownx.highlight:
