@@ -1,0 +1,116 @@
+# Create the ArgoCD AppProject and the app-of-apps Application.
+# Config comes from vars/config.yaml (argocd.project.*, argocd.app_of_apps.*).
+
+- name: Create ArgoCD AppProject manifest
+  ansible.builtin.copy:
+      content: |
+          apiVersion: argoproj.io/v1alpha1
+          kind: AppProject
+          metadata:
+            name: {{ argocd.project.name }}
+            namespace: argocd
+          spec:
+            description: {{ argocd.project.description }}
+            sourceRepos:
+          {% for repo in argocd.project.source_repos %}
+              - "{{ repo }}"
+          {% endfor %}
+            destinations:
+          {% for dest in argocd.project.destinations %}
+              - namespace: "{{ dest.namespace }}"
+                server: {{ dest.server }}
+          {% endfor %}
+            clusterResourceWhitelist:
+          {% for resource in argocd.project.cluster_resource_whitelist %}
+              - group: "{{ resource.group }}"
+                kind: "{{ resource.kind }}"
+          {% endfor %}
+      dest: /tmp/argocd-appproject.yaml
+      mode: "0644"
+
+- name: Create ArgoCD app-of-apps Application manifest
+  ansible.builtin.copy:
+      content: |
+          apiVersion: argoproj.io/v1alpha1
+          kind: Application
+          metadata:
+            name: {{ argocd.app_of_apps.name }}
+            namespace: argocd
+            finalizers:
+              - resources-finalizer.argocd.argoproj.io
+          spec:
+            project: {{ argocd.project.name }}
+            source:
+              repoURL: {{ argocd.app_of_apps.repo_url }}
+              targetRevision: {{ argocd.app_of_apps.target_revision }}
+              path: {{ argocd.app_of_apps.path }}
+            destination:
+              server: {{ argocd.project.destinations[0].server }}
+              namespace: argocd
+            syncPolicy:
+              automated:
+                prune: {{ argocd.app_of_apps.sync_policy.automated.prune | lower }}
+                selfHeal: {{ argocd.app_of_apps.sync_policy.automated.self_heal | lower }}
+              syncOptions:
+          {% for option in argocd.app_of_apps.sync_policy.sync_options %}
+                - {{ option }}
+          {% endfor %}
+      dest: /tmp/argocd-application.yaml
+      mode: "0644"
+
+- name: Apply ArgoCD AppProject
+  ansible.builtin.command: kubectl apply -f /tmp/argocd-appproject.yaml
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_project_apply
+  changed_when: "'created' in argocd_project_apply.stdout or 'configured' in argocd_project_apply.stdout"
+
+- name: Apply ArgoCD app-of-apps Application
+  ansible.builtin.command: kubectl apply -f /tmp/argocd-application.yaml
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_app_apply
+  changed_when: "'created' in argocd_app_apply.stdout or 'configured' in argocd_app_apply.stdout"
+
+# A private source repo needs credentials configured in ArgoCD or the app-of-apps
+# will fail to sync. Warn (don't fail) if the repo isn't publicly reachable.
+- name: Check whether the source repo is publicly reachable (GitHub)
+  ansible.builtin.uri:
+      url: "{{ argocd.app_of_apps.repo_url | regex_replace('https://github.com/', 'https://api.github.com/repos/') }}"
+      method: GET
+      status_code: [200, 404]
+  register: repo_check
+  delegate_to: localhost
+  changed_when: false
+  failed_when: false
+  when: "'github.com' in argocd.app_of_apps.repo_url"
+
+- name: Warn if the source repo is not public
+  ansible.builtin.debug:
+      msg: >-
+          WARNING: {{ argocd.app_of_apps.repo_url }} is not publicly reachable
+          (HTTP {{ repo_check.status }}). Configure repository credentials in
+          ArgoCD or the '{{ argocd.app_of_apps.name }}' app will not sync.
+  when:
+      - "'github.com' in argocd.app_of_apps.repo_url"
+      - repo_check.status is defined
+      - repo_check.status != 200
+
+- name: Get all ArgoCD Applications
+  ansible.builtin.command: >-
+      kubectl get applications -n argocd
+      -o custom-columns=NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status
+      --no-headers
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: all_apps_status
+  changed_when: false
+  failed_when: false
+
+- name: Display ArgoCD project status
+  ansible.builtin.debug:
+      msg:
+          - "Project: {{ argocd.project.name }}"
+          - "App-of-apps: {{ argocd.app_of_apps.name }} ({{ argocd.app_of_apps.repo_url }} @ {{ argocd.app_of_apps.target_revision }}, path: {{ argocd.app_of_apps.path }})"
+          - "Applications:"
+          - "{{ all_apps_status.stdout_lines | default(['(none yet)']) }}"

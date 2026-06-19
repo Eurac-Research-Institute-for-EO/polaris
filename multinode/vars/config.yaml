@@ -1,3 +1,121 @@
+# Single source of inputs for the multinode setup. Every playbook and task file
+# reads its configurables from here (loaded via `vars_files: ../vars/config.yaml`).
+
+# Cluster identity.
 cluster:
-    domain: "10.8.244.214.nip.io"
+    # Base domain for cluster services. ArgoCD is exposed at argocd.<domain>.
+    # Using nip.io with the master IP resolves automatically for local setups.
+    domain: "10.8.244.253.nip.io"
+    # A label for the cluster, used for identification only.
     name: "polaris-multinode"
+    # Upstream DNS servers CoreDNS forwards to, in preference order. Used with
+    # `policy sequential` (tasks/master/coredns.yaml) so the first REACHABLE
+    # server is always used. We pin 10.8.28.2 first because 10.8.28.1 does not
+    # answer queries from the pod network (times out), which made pods fail to
+    # resolve external names like the Keycloak OIDC issuer. The node's default
+    # /etc/resolv.conf lists 10.8.28.1 first, which is why the default CoreDNS
+    # `forward . /etc/resolv.conf` was intermittently broken inside pods.
+    dns_servers:
+        - "10.8.28.2"
+        - "10.8.28.1"
+    # EXTRA search domains appended to the kubelet resolv.conf used by ALL pods
+    # (k3s --resolv-conf, see tasks/common/dns.yaml). Pods ALWAYS get the in-cluster
+    # domains (svc.cluster.local etc.) regardless of this list.
+    #
+    # This is intentionally EMPTY, and that does NOT bypass corporate DNS: every
+    # lookup still goes to CoreDNS -> dns_servers above, so full names like
+    # edp-portal.eurac.edu, host.eurac.edu or github.com all resolve via work
+    # DNS. A search domain only auto-completes BARE short names (e.g. "host" ->
+    # "host.eurac.edu"), which nothing here relies on. We must leave it empty
+    # because eurac.edu / unibz.it / scientificnet.org answer UNKNOWN names with
+    # 0.0.0.0 (a wildcard) instead of NXDOMAIN; combined with the pod default
+    # ndots:5 (kubelet hardcodes this and ignores any ndots in the resolv.conf),
+    # a name like github.com was tried as github.com.eurac.edu -> 0.0.0.0 and the
+    # real record was never reached. With no corporate search domains, names fall
+    # through the cluster suffixes to the absolute name and resolve correctly.
+    # Only add a domain here if a workload truly needs bare short-name lookups in
+    # it (which re-introduces the 0.0.0.0 trap for that domain).
+    dns_search: []
+
+# Initial VM login user, used ONLY by bootstrap_user.yaml to create the
+# deployment user. Must already have your SSH key installed and sudo access.
+initial_user: jzvolensky
+
+# Dedicated deployment user created on every node by bootstrap_user.yaml.
+# This is the steady-state ansible_user in inventory.ini — all other playbooks
+# connect as this user with passwordless sudo.
+deploy_user: polaris
+
+# Public key installed for the deployment user (path on your local machine).
+# `~` is expanded. Override per-run with -e deploy_user_pubkey=/path/to/key.pub.
+deploy_user_pubkey: "~/.ssh/id_ed_polaris.pub"
+
+# Pinned, tested component versions — change only with a specific reason.
+versions:
+    k3s: "v1.35.0+k3s3"
+    helm: "v4.1.1"
+    argocd: "9.4.0"
+
+# Path to the K3s-generated kubeconfig on the master node.
+kubeconfig_path: /etc/rancher/k3s/k3s.yaml
+
+# Per-node environment labels. Each entry adds the label
+# polaris.eurac.edu/env=<value> to the node whose InternalIP matches the key
+# (we match by IP, not hostname, because k3s lowercases node names). The openeo
+# overlays use this label as a nodeSelector to pin dev/stable workloads:
+#   dev overlay    -> polaris.eurac.edu/env=dev
+#   stable overlay -> polaris.eurac.edu/env=stable
+# Applied by tasks/master/node_labels.yaml after the workers have joined.
+node_env_labels:
+    "10.8.244.185": dev
+    # "10.8.244.73": stable   # uncomment when the stable node comes online
+
+# ArgoCD configuration. The sensitive OIDC client secret is NOT here — it lives
+# in vars/secrets.yaml (gitignored). See vars/secrets.example.yaml.
+argocd:
+    # Keycloak OIDC single sign-on. The clientID below is not secret; the
+    # matching client secret is `oidc_client_secret` in vars/secrets.yaml.
+    oidc:
+        enabled: true
+        name: "Keycloak"
+        issuer: "https://edp-portal.eurac.edu/auth/realms/edp"
+        client_id: "polaris_argocd"
+        requested_scopes:
+            - "openid"
+            - "profile"
+            - "email"
+            - "groups"
+    # Role-based access. Members of admin_group get full admin; everyone else
+    # authenticated gets default_role.
+    rbac:
+        admin_group: "polaris_admins"
+        default_role: "readonly"
+    # AppProject: the set of repos/destinations applications in this project may use.
+    project:
+        name: "polaris"
+        description: "Polaris Work Cluster Applications"
+        source_repos:
+            - "https://github.com/Eurac-Research-Institute-for-EO/polaris"
+            - "https://github.com/Eurac-Research-Institute-for-EO/polaris-apps"
+            - "https://github.com/Eurac-Research-Institute-for-EO/charts"
+            - "https://prometheus-community.github.io/helm-charts"
+            - "https://grafana.github.io/helm-charts"
+        destinations:
+            - namespace: "*"
+              server: "https://kubernetes.default.svc"
+        cluster_resource_whitelist:
+            - group: "*"
+              kind: "*"
+    # App-of-apps: a single Application that syncs the repo's `path` and pulls in
+    # the rest of the applications from there.
+    app_of_apps:
+        name: "polaris-apps"
+        repo_url: "https://github.com/Eurac-Research-Institute-for-EO/polaris-apps"
+        target_revision: "dev"
+        path: "apps"
+        sync_policy:
+            automated:
+                prune: true
+                self_heal: true
+            sync_options:
+                - "CreateNamespace=true"

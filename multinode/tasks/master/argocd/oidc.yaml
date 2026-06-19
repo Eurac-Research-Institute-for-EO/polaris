@@ -1,0 +1,35 @@
+# Wire the Keycloak OIDC credentials into ArgoCD.
+#
+# The clientId/clientSecret are patched into argocd-secret AFTER the Helm
+# install (install.yaml) rather than via Helm values, to avoid Helm ownership
+# conflicts on the chart-managed secret. Re-running `helm upgrade` re-renders
+# that secret and drops these keys, so this task must run after every install.
+# Skipped entirely when argocd.oidc.enabled is false.
+- name: Update argocd-secret with Keycloak OIDC credentials
+  ansible.builtin.shell: |
+      kubectl get secret argocd-secret -n argocd -o json | \
+      jq --arg clientId "{{ argocd.oidc.client_id }}" \
+         --arg clientSecret "{{ oidc_client_secret }}" \
+         '.data["oidc.keycloak.clientId"] = ($clientId | @base64) |
+          .data["oidc.keycloak.clientSecret"] = ($clientSecret | @base64)' | \
+      kubectl apply -f -
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: update_secret
+  changed_when: "'configured' in update_secret.stdout"
+  no_log: true
+  when: argocd.oidc.enabled | bool
+
+- name: Restart ArgoCD server to apply OIDC configuration
+  ansible.builtin.command: kubectl rollout restart deployment/argocd-server -n argocd
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  changed_when: true
+  when: update_secret.changed | default(false)
+
+- name: Wait for ArgoCD server rollout to complete
+  ansible.builtin.command: kubectl rollout status deployment/argocd-server -n argocd --timeout=300s
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  changed_when: false
+  when: update_secret.changed | default(false)

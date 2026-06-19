@@ -1,0 +1,34 @@
+# Label cluster nodes with their polaris environment (polaris.eurac.edu/env).
+#
+# The openeo overlays pin their workloads with a nodeSelector of
+# polaris.eurac.edu/env=<dev|stable>, so the target node MUST carry that label
+# or the openeo API pod stays Pending (and its DB-migration init container never
+# runs). Mapping lives in vars/config.yaml (node_env_labels), keyed by the node's
+# InternalIP — we match on IP rather than hostname because k3s lowercases node
+# names (e.g. host POLARISmaster registers as a lowercased node name).
+#
+# Must run AFTER the workers have joined (the nodes have to exist), so it is
+# included from the final control play in playbooks/deploy.yaml.
+
+- name: Label nodes with their polaris environment
+  ansible.builtin.shell: |
+      set -euo pipefail
+      NODE=$(kubectl get nodes \
+        -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.addresses[?(@.type=="InternalIP")].address}{"\n"}{end}' \
+        | awk -v ip="{{ item.key }}" '$2 == ip { print $1 }')
+      if [ -z "$NODE" ]; then
+        echo "ERROR: no node found with InternalIP {{ item.key }}" >&2
+        exit 1
+      fi
+      kubectl label node "$NODE" polaris.eurac.edu/env={{ item.value }} --overwrite
+  args:
+      # set -o pipefail needs bash; Ansible's shell module defaults to /bin/sh (dash).
+      executable: /bin/bash
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: node_label
+  changed_when: "'labeled' in node_label.stdout and 'not labeled' not in node_label.stdout"
+  loop: "{{ node_env_labels | dict2items }}"
+  loop_control:
+      label: "{{ item.key }} -> polaris.eurac.edu/env={{ item.value }}"
+  when: node_env_labels is defined

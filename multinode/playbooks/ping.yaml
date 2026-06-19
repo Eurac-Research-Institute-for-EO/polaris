@@ -1,0 +1,37 @@
+# Connectivity check for the dedicated deployment user.
+#
+# Run this AFTER bootstrap_user.yaml. It confirms two things on every node:
+#   1. SSH/key-based access works as the deployment user.
+#   2. Passwordless sudo works for that user.
+#
+# Usage:
+#   ansible-playbook -i inventory.ini playbooks/ping.yaml
+
+- name: Verify deployment user access on all nodes
+  hosts: all_nodes
+  gather_facts: false
+  vars_files:
+      - ../vars/config.yaml
+  remote_user: "{{ deploy_user }}"
+  tasks:
+      - name: Ping each node as the deployment user
+        ansible.builtin.ping:
+
+      - name: Confirm we are connected as the deployment user
+        ansible.builtin.command: whoami
+        changed_when: false
+        register: connected_user
+
+      - name: Confirm passwordless sudo works
+        ansible.builtin.command: whoami
+        changed_when: false
+        become: true
+        register: sudo_user
+
+      - name: Report access status
+        ansible.builtin.assert:
+            that:
+                - connected_user.stdout == deploy_user
+                - sudo_user.stdout == "root"
+            success_msg: "OK — connected as '{{ connected_user.stdout }}', sudo resolves to '{{ sudo_user.stdout }}'."
+            fail_msg: "FAILED — connected as '{{ connected_user.stdout }}' (expected '{{ deploy_user }}'), sudo resolved to '{{ sudo_user.stdout }}' (expected 'root')."

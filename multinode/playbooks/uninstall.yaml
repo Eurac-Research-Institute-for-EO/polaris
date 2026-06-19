@@ -1,0 +1,87 @@
+# Tear down the K3s cluster on every node so you can start over with deploy.yaml.
+#
+# Removes:
+#   - K3s agents on the workers (k3s-agent-uninstall.sh)
+#   - K3s server on the master (k3s-uninstall.sh) — this also destroys
+#     EVERYTHING running in the cluster, including ArgoCD, the polaris project,
+#     and all workloads/data (local-path PVs included).
+#   - The Helm binary and leftover /tmp manifests.
+# Keeps:
+#   - System libraries (curl, jq, …), the polaris deployment user, SSH access.
+#
+# This is destructive and irreversible. Run from the multinode/ directory:
+#   ansible-playbook -i inventory.ini playbooks/uninstall.yaml
+# Skip the confirmation prompt (e.g. in scripts):
+#   ansible-playbook -i inventory.ini playbooks/uninstall.yaml -e teardown_confirmed=yes
+
+- name: Confirm teardown
+  hosts: localhost
+  gather_facts: false
+  vars_prompt:
+      - name: teardown_confirmed
+        prompt: "This DESTROYS the K3s cluster (and ArgoCD/workloads) on ALL nodes. Type 'yes' to continue"
+        private: false
+  tasks:
+      - name: Abort unless explicitly confirmed
+        ansible.builtin.assert:
+            that:
+                - teardown_confirmed | lower == 'yes'
+            fail_msg: "Teardown aborted — confirmation not given."
+            success_msg: "Confirmed. Tearing down the cluster."
+
+- name: Tear down K3s agents on the workers
+  hosts: workers
+  become: true
+  gather_facts: false
+  tasks:
+      - name: Check for the k3s-agent uninstall script
+        ansible.builtin.stat:
+            path: /usr/local/bin/k3s-agent-uninstall.sh
+        register: agent_uninstall
+
+      - name: Run k3s-agent-uninstall.sh
+        ansible.builtin.command: /usr/local/bin/k3s-agent-uninstall.sh
+        when: agent_uninstall.stat.exists
+        register: agent_teardown
+        changed_when: agent_teardown.rc == 0
+
+      - name: Report worker state
+        ansible.builtin.debug:
+            msg: "{{ 'K3s agent removed.' if agent_uninstall.stat.exists else 'No k3s agent found — nothing to remove.' }}"
+
+- name: Tear down the K3s server and cluster on the master
+  hosts: control
+  become: true
+  gather_facts: false
+  tasks:
+      - name: Check for the k3s-server uninstall script
+        ansible.builtin.stat:
+            path: /usr/local/bin/k3s-uninstall.sh
+        register: server_uninstall
+
+      - name: Run k3s-uninstall.sh (removes K3s and all cluster workloads, incl. ArgoCD)
+        ansible.builtin.command: /usr/local/bin/k3s-uninstall.sh
+        when: server_uninstall.stat.exists
+        register: server_teardown
+        changed_when: server_teardown.rc == 0
+
+      - name: Remove the Helm binary
+        ansible.builtin.file:
+            path: /usr/local/bin/helm
+            state: absent
+
+      - name: Remove leftover ArgoCD manifests from /tmp
+        ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+        loop:
+            - /tmp/argocd-values.yaml
+            - /tmp/argocd-appproject.yaml
+            - /tmp/argocd-application.yaml
+
+      - name: Report teardown result
+        ansible.builtin.debug:
+            msg: >-
+                {{ 'K3s server + cluster removed.' if server_uninstall.stat.exists
+                   else 'No k3s server found — nothing to remove.' }}
+                Re-run playbooks/deploy.yaml to rebuild the cluster.

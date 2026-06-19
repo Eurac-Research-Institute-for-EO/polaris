@@ -210,6 +210,9 @@ __marimo__/
 # Plain text cluster configuration (contains secrets)
 ansible/vars/cluster_secrets.yaml
 
+# Multinode secrets (OIDC client secret, etc.)
+multinode/vars/secrets.yaml
+
 # Old keycloak secrets file (deprecated)
 ansible/vars/keycloak_secrets.yaml
 

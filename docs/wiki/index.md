@@ -40,7 +40,7 @@ The setup is defined in a way to make it as easy as possible to go from nothing 
 
 To setup Polaris, you can follow the instructions in the [Installation](installation.md) section of this documentation. This section provides step-by-step instructions for installing and configuring the cluster, as well as troubleshooting tips and best practices for managing the cluster.
 
-For a multi-node setup (1 master + 2 workers), see the [Multinode Installation](multinode.md) page.
+For a multi-node setup (1 master + 2 workers), see the [Multinode Installation](multinode/multinode.md) page.
 
 ## Uninstallation
 

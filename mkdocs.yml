@@ -31,6 +31,14 @@ nav:
     - Uninstall: uninstall.md
     - Secrets: secrets.md
     - Multinode:
+          - Overview: multinode/multinode.md
+          - Prerequisites: multinode/prerequisites.md
+          - SSH & Deployment User: multinode/deployment-user.md
+          - Configuration: multinode/configuration.md
+          - Secrets: multinode/secrets.md
+          - Deploy & Verify: multinode/deployment.md
+          - Operations: multinode/operations.md
+          - Troubleshooting: multinode/troubleshooting.md
 
 markdown_extensions:
     - pymdownx.highlight:

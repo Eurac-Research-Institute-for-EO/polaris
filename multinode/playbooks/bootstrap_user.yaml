@@ -1,0 +1,77 @@
+# One-shot bootstrap of the dedicated deployment user on every node.
+#
+# This playbook does the whole handover in a single run, no inventory edits:
+#   Play 1 connects as the INITIAL VM user ({{ initial_user }}) and creates the
+#          deployment user ({{ deploy_user }}) with its key and passwordless sudo.
+#   Play 2 (imported ping.yaml) reconnects as {{ deploy_user }} and verifies
+#          access + passwordless sudo actually work.
+#
+# The inventory's ansible_user can stay set to the deployment user permanently;
+# Play 1 overrides ansible_user (via a play var) to the initial user just for
+# the create step.
+#
+# Prerequisite: your SSH key is already installed for {{ initial_user }} on all
+# nodes (ssh-copy-id), and {{ initial_user }} has sudo.
+#
+# Usage:
+#   ansible-playbook -i inventory.ini bootstrap_user.yaml --ask-become-pass
+
+- name: Create dedicated deployment user on all nodes
+  hosts: all_nodes
+  become: true
+  vars_files:
+      - ../vars/config.yaml
+  vars:
+      # Connect as the initial VM user for this play only — the deployment user
+      # does not exist yet. This must be a play var (not the remote_user keyword),
+      # because the inventory's ansible_user otherwise wins over remote_user.
+      # (initial_user comes from config.yaml.)
+      ansible_user: "{{ initial_user }}"
+  tasks:
+      - name: Create the deployment user
+        ansible.builtin.user:
+            name: "{{ deploy_user }}"
+            shell: /bin/bash
+            create_home: true
+            groups: sudo
+            append: true
+
+      - name: Install SSH public key for the deployment user
+        ansible.posix.authorized_key:
+            user: "{{ deploy_user }}"
+            key: "{{ lookup('file', deploy_user_pubkey | expanduser) }}"
+            state: present
+
+      - name: Grant passwordless sudo to the deployment user
+        ansible.builtin.copy:
+            dest: "/etc/sudoers.d/{{ deploy_user }}"
+            content: "{{ deploy_user }} ALL=(ALL) NOPASSWD:ALL\n"
+            owner: root
+            group: root
+            mode: "0440"
+            validate: "visudo -cf %s"
+
+      # These VMs restrict SSH logins with an `AllowUsers` line in sshd_config.
+      # If present and it doesn't already list the deployment user, append it so
+      # the user can log in. The regexp only matches an existing AllowUsers line
+      # that lacks the user (negative lookahead), so it's a no-op if the line is
+      # absent or already correct. Config is validated with `sshd -t` first.
+      - name: Allow the deployment user in sshd AllowUsers (if such a rule exists)
+        ansible.builtin.lineinfile:
+            path: /etc/ssh/sshd_config
+            regexp: '^(AllowUsers (?!.*\b{{ deploy_user }}\b).*)$'
+            line: '\1 {{ deploy_user }}'
+            backrefs: true
+            validate: "sshd -t -f %s"
+        notify: Reload sshd
+
+  handlers:
+      - name: Reload sshd
+        ansible.builtin.service:
+            name: ssh
+            state: reloaded
+
+# Verify the deployment user works (connects as {{ deploy_user }}, checks
+# passwordless sudo). Same checks as running ping.yaml on its own.
+- name: Verify deployment user access
+  import_playbook: ping.yaml
