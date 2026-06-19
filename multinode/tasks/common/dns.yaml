@@ -1,0 +1,78 @@
+# Cluster-wide pod DNS fix (applies to every node, master and workers).
+# Included by playbooks/deploy.yaml for the all_nodes play, alongside packages.yaml.
+#
+# Pods default to `options ndots:5` and inherit the node's resolv.conf search
+# domains, which include unibz.it / scientificnet.org. Those domains answer
+# UNKNOWN names with 0.0.0.0 instead of NXDOMAIN, so an external name such as
+# edp-portal.eurac.edu was tried as <name>.unibz.it FIRST, "resolved" to
+# 0.0.0.0, and never reached the real record (ArgoCD dialed 0.0.0.0 for the
+# Keycloak issuer; any workload reaching github.com etc. hit the same trap).
+#
+# We point kubelet at a resolv.conf WE control (k3s --resolv-conf) with no
+# corporate search domains (cluster.dns_search), so EVERY pod gets clean
+# external DNS without per-workload dnsConfig. CoreDNS is unaffected — it
+# forwards explicitly to cluster.dns_servers (tasks/master/coredns.yaml).
+- name: Ensure /etc/rancher/k3s directory exists
+  ansible.builtin.file:
+      path: /etc/rancher/k3s
+      state: directory
+      mode: "0755"
+      owner: root
+      group: root
+
+- name: Write the kubelet resolv.conf used by all pods
+  ansible.builtin.copy:
+      dest: /etc/rancher/k3s/resolv.conf
+      content: |
+          # Managed by Ansible (multinode/tasks/common/dns.yaml). Kubelet resolv.conf
+          # for all pods via k3s --resolv-conf. We add NO corporate search domains
+          # (cluster.dns_search is empty): eurac.edu / unibz.it / scientificnet.org
+          # answer unknown names with 0.0.0.0, which combined with the pod default
+          # ndots:5 poisoned external resolution. Pods still resolve everything via
+          # CoreDNS (-> these nameservers); full names just fall through the
+          # cluster suffixes to the absolute name. See vars/config.yaml dns_search.
+          {% for ns in cluster.dns_servers %}
+          nameserver {{ ns }}
+          {% endfor %}
+          {% if cluster.dns_search | length > 0 %}
+          search {{ cluster.dns_search | join(' ') }}
+          {% endif %}
+      mode: "0644"
+      owner: root
+      group: root
+  register: k3s_resolvconf
+
+# Single k3s config.yaml per node: resolv-conf everywhere, plus the kubeconfig
+# mode on the master (consumed by tasks/master/k3s-server.yaml at install time).
+- name: Write k3s config.yaml (resolv-conf, and kubeconfig mode on master)
+  ansible.builtin.copy:
+      dest: /etc/rancher/k3s/config.yaml
+      content: |
+          resolv-conf: /etc/rancher/k3s/resolv.conf
+          {% if node_role == 'master' %}
+          write-kubeconfig-mode: "0644"
+          {% endif %}
+      mode: "0644"
+      owner: root
+      group: root
+  register: k3s_config
+
+- name: Determine this node's k3s service name
+  ansible.builtin.set_fact:
+      k3s_service_name: "{{ 'k3s' if node_role == 'master' else 'k3s-agent' }}"
+
+- name: Check whether k3s is already running on this node
+  ansible.builtin.command: systemctl is-active {{ k3s_service_name }}
+  register: k3s_service_state
+  changed_when: false
+  failed_when: false
+
+# On a fresh deploy k3s is not installed yet, so the config is simply picked up
+# at install time. On a re-run we must restart for resolv-conf changes to apply.
+- name: Restart k3s to apply DNS config changes
+  ansible.builtin.systemd:
+      name: "{{ k3s_service_name }}"
+      state: restarted
+  when:
+      - k3s_service_state.stdout == 'active'
+      - k3s_resolvconf.changed or k3s_config.changed

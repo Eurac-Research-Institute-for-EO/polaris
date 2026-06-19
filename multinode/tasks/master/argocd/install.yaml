@@ -1,0 +1,160 @@
+# Install ArgoCD via Helm with Keycloak OIDC single sign-on.
+#   1. Load the OIDC client secret from vars/secrets.yaml (when OIDC enabled).
+#   2. Install ArgoCD with Helm values that wire up the ingress + oidc.config.
+#   3. Print the local admin credentials.
+# The Keycloak clientId/clientSecret are then patched into argocd-secret by the
+# sibling oidc.yaml (run next from deploy.yaml). Non-secret config comes from
+# vars/config.yaml (argocd.*, cluster.domain).
+
+- name: Check OIDC secrets file exists
+  ansible.builtin.stat:
+      path: "{{ playbook_dir }}/../vars/secrets.yaml"
+  register: multinode_secrets_file
+  delegate_to: localhost
+  become: false
+  when: argocd.oidc.enabled | bool
+
+- name: Fail if OIDC secrets file is missing
+  ansible.builtin.fail:
+      msg: |
+          OIDC is enabled (argocd.oidc.enabled) but vars/secrets.yaml was not found.
+
+          Create it from the template and fill in the client secret:
+            cd multinode
+            cp vars/secrets.example.yaml vars/secrets.yaml
+            $EDITOR vars/secrets.yaml
+  when:
+      - argocd.oidc.enabled | bool
+      - not multinode_secrets_file.stat.exists
+
+- name: Load OIDC secret
+  ansible.builtin.include_vars:
+      file: "{{ playbook_dir }}/../vars/secrets.yaml"
+  no_log: true
+  when: argocd.oidc.enabled | bool
+
+- name: Create ArgoCD namespace
+  ansible.builtin.shell: |
+      kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_namespace
+  changed_when: "'created' in argocd_namespace.stdout"
+
+- name: Add ArgoCD Helm repository
+  ansible.builtin.shell: |
+      helm repo list | grep -q '^argo' || helm repo add argo https://argoproj.github.io/argo-helm
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: helm_argo_repo
+  changed_when: "'has been added' in helm_argo_repo.stdout"
+  failed_when: helm_argo_repo.rc != 0
+
+- name: Update Helm repositories
+  ansible.builtin.command: helm repo update
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  changed_when: false
+
+- name: Create ArgoCD Helm values file
+  ansible.builtin.copy:
+      content: |
+          # Lower ndots from the default 5 to 1 for the argocd components.
+          # The nodes' resolv.conf appends corporate search domains (eurac.edu,
+          # unibz.it, scientificnet.org) and unibz.it has a wildcard that returns
+          # 0.0.0.0 for any name. With ndots:5, short external names like
+          # edp-portal.eurac.edu (2 dots) or github.com (1 dot) are tried WITH
+          # each search suffix first; the query <name>.unibz.it succeeds with
+          # 0.0.0.0 and short-circuits the search, so the real absolute name is
+          # never resolved (ArgoCD dialed 0.0.0.0 for the Keycloak OIDC issuer,
+          # repo-server would fail to clone github.com the same way). ndots:1
+          # makes the absolute name be tried first; in-cluster service names
+          # (0 dots) still go through the search list.
+          #
+          # NOTE: the argo-cd chart has NO global.dnsConfig — it is a per-
+          # component value, so we define it once as a YAML anchor (&ndotsFix)
+          # and reuse it (*ndotsFix) on every component that does external DNS.
+          # This is now belt-and-suspenders: tasks/common/dns.yaml already fixes
+          # pod DNS cluster-wide, but the per-component config keeps ArgoCD safe
+          # even if that node config is changed.
+          controller:
+            dnsConfig: &ndotsFix
+              options:
+                - name: ndots
+                  value: "1"
+          dex:
+            dnsConfig: *ndotsFix
+          repoServer:
+            dnsConfig: *ndotsFix
+          applicationSet:
+            dnsConfig: *ndotsFix
+          notifications:
+            dnsConfig: *ndotsFix
+
+          server:
+            dnsConfig: *ndotsFix
+            service:
+              type: ClusterIP
+            ingress:
+              enabled: true
+              ingressClassName: traefik
+              annotations:
+                traefik.ingress.kubernetes.io/router.entrypoints: web
+              hostname: argocd.{{ cluster.domain }}
+
+          configs:
+            params:
+              server.insecure: true
+            cm:
+              url: "http://argocd.{{ cluster.domain }}"
+          {% if argocd.oidc.enabled | bool %}
+              oidc.config: |
+                name: {{ argocd.oidc.name }}
+                issuer: "{{ argocd.oidc.issuer }}"
+                clientID: $oidc.keycloak.clientId
+                clientSecret: $oidc.keycloak.clientSecret
+                requestedScopes: {{ argocd.oidc.requested_scopes | to_json }}
+                redirectURI: "http://argocd.{{ cluster.domain }}/auth/callback"
+          {% endif %}
+            rbac:
+              policy.csv: |
+                g, {{ argocd.rbac.admin_group }}, role:admin
+              policy.default: {{ argocd.rbac.default_role }}
+      dest: /tmp/argocd-values.yaml
+      mode: "0644"
+
+- name: Install ArgoCD via Helm
+  ansible.builtin.shell: |
+      helm upgrade --install argocd argo/argo-cd \
+        --namespace argocd \
+        --create-namespace \
+        --version {{ versions.argocd }} \
+        --values /tmp/argocd-values.yaml
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_install
+  changed_when: "'has been upgraded' in argocd_install.stdout or 'has been installed' in argocd_install.stdout"
+
+- name: Wait for ArgoCD server to be ready
+  ansible.builtin.command: kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  changed_when: false
+
+- name: Get ArgoCD admin password
+  ansible.builtin.shell: |
+      kubectl get secret argocd-initial-admin-secret -n argocd \
+        -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || echo "N/A"
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_admin_password
+  changed_when: false
+  failed_when: false
+
+- name: Display ArgoCD access info
+  ansible.builtin.debug:
+      msg:
+          - "ArgoCD URL: http://argocd.{{ cluster.domain }}"
+          - "Local admin user: admin"
+          - "Local admin password: {{ argocd_admin_password.stdout }}"
+          - "SSO: {{ 'Keycloak OIDC enabled (' + argocd.oidc.name + ')' if argocd.oidc.enabled | bool else 'disabled' }}"

@@ -1,0 +1,30 @@
+# Install k3s agent and join the master node.
+# Requires master_ip and k3s_token vars set from the master play via hostvars.
+- name: Check if k3s is already installed
+  ansible.builtin.stat:
+      path: /usr/local/bin/k3s
+  register: k3s_binary
+
+- name: Check k3s version if installed
+  ansible.builtin.command: /usr/local/bin/k3s --version
+  register: k3s_version_output
+  changed_when: false
+  failed_when: false
+  when: k3s_binary.stat.exists
+
+- name: Install k3s agent and join cluster
+  ansible.builtin.shell: |
+      curl -sfL https://get.k3s.io | \
+        INSTALL_K3S_VERSION="{{ versions.k3s }}" \
+        K3S_URL="https://{{ master_ip }}:6443" \
+        K3S_TOKEN="{{ k3s_token }}" \
+        sh -
+  when: not k3s_binary.stat.exists or versions.k3s not in k3s_version_output.stdout
+  register: k3s_install
+  changed_when: k3s_install.rc == 0
+
+- name: Ensure k3s-agent service is running and enabled
+  ansible.builtin.systemd:
+      name: k3s-agent
+      state: started
+      enabled: true

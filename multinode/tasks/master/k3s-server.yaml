@@ -1,0 +1,48 @@
+# Install k3s server on the master node and expose the join token for workers.
+# The /etc/rancher/k3s directory and config.yaml (resolv-conf + kubeconfig mode)
+# are written earlier for every node by tasks/common/dns.yaml.
+- name: Check if k3s is already installed
+  ansible.builtin.stat:
+      path: /usr/local/bin/k3s
+  register: k3s_binary
+
+- name: Check k3s version if installed
+  ansible.builtin.command: /usr/local/bin/k3s --version
+  register: k3s_version_output
+  changed_when: false
+  failed_when: false
+  when: k3s_binary.stat.exists
+
+- name: Install k3s server
+  ansible.builtin.shell: |
+      curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="{{ versions.k3s }}" sh -
+  when: not k3s_binary.stat.exists or versions.k3s not in k3s_version_output.stdout
+  register: k3s_install
+  changed_when: k3s_install.rc == 0
+
+- name: Wait for k3s to be ready
+  ansible.builtin.wait_for:
+      path: /etc/rancher/k3s/k3s.yaml
+      state: present
+      timeout: 300
+
+- name: Ensure kubeconfig is readable
+  ansible.builtin.file:
+      path: /etc/rancher/k3s/k3s.yaml
+      mode: "0644"
+      owner: root
+      group: root
+
+- name: Fetch node token for workers
+  ansible.builtin.command: cat /var/lib/rancher/k3s/server/node-token
+  register: k3s_node_token
+  changed_when: false
+
+- name: Wait for the master node to be Ready
+  # Wait for all nodes (only the master exists at this phase). Referencing the
+  # node by name is fragile: Kubernetes lowercases/sanitizes the hostname, so
+  # a mixed-case host like "POLARISmaster" registers as "polarismaster".
+  ansible.builtin.command: kubectl wait --for=condition=Ready nodes --all --timeout=120s
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  changed_when: false

@@ -1,0 +1,93 @@
+# Deploy the multi-node K3s cluster.
+#
+# Plays run sequentially (each finishes on all its hosts before the next
+# starts), which gives the ordering the cluster needs:
+#   1. all_nodes — install system packages and write the cluster-wide DNS config.
+#   2. control   — install the K3s server (and WAIT for it to be Ready),
+#                  expose the join token, then install Helm and ArgoCD.
+#   3. workers   — install the K3s agent and join each worker to the master,
+#                  using the join token + master IP discovered in phase 2.
+#   4. control   — wait until every node (master + workers) reports Ready,
+#                  confirming the joins succeeded.
+#
+# Because the worker play only starts after the master play completes, workers
+# never attempt to join before the master API is up.
+#
+# Prerequisite: run playbooks/bootstrap_user.yaml first so the deployment user
+# ({{ deploy_user }}) exists on every node; this playbook connects as that user
+# (ansible_user in inventory.ini) with passwordless sudo.
+#
+# Usage (from the multinode/ directory):
+#   ansible-playbook -i inventory.ini playbooks/deploy.yaml
+
+- name: Install system dependencies on all nodes
+  hosts: all_nodes
+  become: true
+  vars_files:
+      - ../vars/config.yaml
+  tasks:
+      - name: Install system packages
+        ansible.builtin.include_tasks: ../tasks/common/packages.yaml
+      - name: Configure cluster-wide pod DNS
+        ansible.builtin.include_tasks: ../tasks/common/dns.yaml
+
+- name: Install K3s server, Helm and ArgoCD on the master
+  hosts: control
+  become: true
+  vars_files:
+      - ../vars/config.yaml
+  tasks:
+      - name: Install K3s server
+        ansible.builtin.include_tasks: ../tasks/master/k3s-server.yaml
+      - name: Configure CoreDNS upstream resolvers
+        ansible.builtin.include_tasks: ../tasks/master/coredns.yaml
+      - name: Install Helm
+        ansible.builtin.include_tasks: ../tasks/master/helm.yaml
+      - name: Install ArgoCD
+        ansible.builtin.include_tasks: ../tasks/master/argocd/install.yaml
+      - name: Configure ArgoCD Keycloak OIDC
+        ansible.builtin.include_tasks: ../tasks/master/argocd/oidc.yaml
+      - name: Create application secrets
+        ansible.builtin.include_tasks: ../tasks/master/secrets.yaml
+      - name: Create ArgoCD project and app-of-apps
+        ansible.builtin.include_tasks: ../tasks/master/argocd/project.yaml
+
+- name: Join K3s agents on the worker nodes
+  hosts: workers
+  become: true
+  vars_files:
+      - ../vars/config.yaml
+  vars:
+      # Derived at run time (not user config): pulled from the master play's
+      # hostvars (registered in k3s-server.yaml).
+      master_ip: "{{ hostvars[groups['control'][0]]['ansible_host'] | default(groups['control'][0]) }}"
+      k3s_token: "{{ hostvars[groups['control'][0]]['k3s_node_token'].stdout }}"
+  tasks:
+      - name: Install K3s agent and join the cluster
+        ansible.builtin.include_tasks: ../tasks/worker/k3s-agent.yaml
+
+- name: Confirm all nodes joined and are Ready
+  hosts: control
+  become: true
+  vars_files:
+      - ../vars/config.yaml
+  tasks:
+      - name: Wait for every node (master + workers) to be Ready
+        ansible.builtin.command: kubectl wait --for=condition=Ready nodes --all --timeout=180s
+        environment:
+            KUBECONFIG: "{{ kubeconfig_path }}"
+        changed_when: false
+
+      - name: Label nodes with their polaris environment
+        ansible.builtin.include_tasks: ../tasks/master/node_labels.yaml
+
+      - name: Get cluster nodes
+        ansible.builtin.command: kubectl get nodes -o wide
+        environment:
+            KUBECONFIG: "{{ kubeconfig_path }}"
+        changed_when: false
+        register: cluster_nodes
+
+      - name: Show cluster nodes
+        ansible.builtin.debug:
+            var: cluster_nodes.stdout_lines

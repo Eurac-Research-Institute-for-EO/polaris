@@ -9,7 +9,6 @@ Most of the setup is completely automated, but it requires a few manual steps an
    - [Local machine](#local-machine)
         - [Ansible installation](#ansible-installation)
         - [SSH access](#ssh-access)
-        - [User with sudo privileges](#user-with-sudo-privileges)
    - [Remote server](#remote-server)
 - [Configuration of Ansible](#configuration-of-ansible)
 
