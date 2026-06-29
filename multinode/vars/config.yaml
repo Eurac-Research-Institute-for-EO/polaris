@@ -52,9 +52,14 @@ deploy_user_pubkey: "~/.ssh/id_ed_polaris.pub"
 
 # Pinned, tested component versions — change only with a specific reason.
 versions:
-    k3s: "v1.35.0+k3s3"
-    helm: "v4.1.1"
-    argocd: "9.4.0"
+    k3s: "v1.36.2+k3s1"
+    helm: "v4.2.2"
+    argocd: "10.0.0"
+    # argo-helm chart version for argocd-image-updater (NOT the app version):
+    # chart 1.2.4 -> appVersion v1.2.2 (the running binary version, since the
+    # chart's image.tag defaults to appVersion). The chart and app versions
+    # increment independently. https://github.com/argoproj/argo-helm/releases
+    argocd_image_updater: "1.2.4"
 
 # Path to the K3s-generated kubeconfig on the master node.
 kubeconfig_path: /etc/rancher/k3s/k3s.yaml
@@ -68,7 +73,7 @@ kubeconfig_path: /etc/rancher/k3s/k3s.yaml
 # Applied by tasks/master/node_labels.yaml after the workers have joined.
 node_env_labels:
     "10.8.244.185": dev
-    # "10.8.244.73": stable   # uncomment when the stable node comes online
+    "10.8.244.73": stable
 
 # ArgoCD configuration. The sensitive OIDC client secret is NOT here — it lives
 # in vars/secrets.yaml (gitignored). See vars/secrets.example.yaml.
@@ -90,6 +95,16 @@ argocd:
     rbac:
         admin_group: "polaris_admins"
         default_role: "readonly"
+    # ArgoCD Image Updater — watches container registries and bumps the image
+    # tag on annotated ArgoCD Applications. Installed via Helm by ansible right
+    # after ArgoCD (tasks/master/argocd/image-updater.yaml). It runs in the
+    # argocd namespace in `kubernetes` applications-api mode, so it patches the
+    # Application CRs directly with no argocd API token. Opt apps in per-app with
+    # `argocd-image-updater.argoproj.io/*` annotations; nothing updates until you
+    # do. Set enabled: false to skip the install entirely.
+    image_updater:
+        enabled: true
+        log_level: "info"
     # AppProject: the set of repos/destinations applications in this project may use.
     project:
         name: "polaris"
@@ -100,6 +115,7 @@ argocd:
             - "https://github.com/Eurac-Research-Institute-for-EO/charts"
             - "https://prometheus-community.github.io/helm-charts"
             - "https://grafana.github.io/helm-charts"
+            - "https://helm.dask.org"
         destinations:
             - namespace: "*"
               server: "https://kubernetes.default.svc"

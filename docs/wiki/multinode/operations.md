@@ -35,4 +35,4 @@ It's also safe to re-run on already-clean nodes — each step is skipped if the 
 
 ---
 
-Next: **[Troubleshooting](troubleshooting.md)**
+Next: **[ArgoCD Image Updater](image-updater.md)**

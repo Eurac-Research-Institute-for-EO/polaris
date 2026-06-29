@@ -47,6 +47,8 @@
         ansible.builtin.include_tasks: ../tasks/master/argocd/install.yaml
       - name: Configure ArgoCD Keycloak OIDC
         ansible.builtin.include_tasks: ../tasks/master/argocd/oidc.yaml
+      - name: Install ArgoCD Image Updater
+        ansible.builtin.include_tasks: ../tasks/master/argocd/image-updater.yaml
       - name: Create application secrets
         ansible.builtin.include_tasks: ../tasks/master/secrets.yaml
       - name: Create ArgoCD project and app-of-apps
