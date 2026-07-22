@@ -280,4 +280,4 @@ or an `update-strategy` that does not match how your images are tagged.
 
 ---
 
-Next: **[Troubleshooting](troubleshooting.md)**
+Next: **[Infrastructure Manager (IM)](im.md)**

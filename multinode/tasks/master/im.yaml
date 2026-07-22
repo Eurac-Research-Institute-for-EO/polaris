@@ -1,0 +1,126 @@
+# Install Infrastructure Manager (IM, GRyCAP) via Helm.
+#
+# IM deploys container/VM applications to this cluster (and to clouds) from TOSCA
+# templates, with a web dashboard. We install it imperatively with Helm here —
+# like ArgoCD and Image Updater — NOT through ArgoCD: the IM chart renders the
+# dashboard OIDC client secret and the credentials_key straight from helm values
+# into a ConfigMap/Secret (no existingSecret support), so an ArgoCD deploy would
+# commit those to git. Driving it from ansible lets both come from the gitignored
+# vars/secrets.yaml (im_secrets) instead.
+#
+# Apps that IM itself deploys are plain Kubernetes resources that no ArgoCD
+# Application tracks, so there is no prune/self-heal clash with the GitOps apps —
+# you manage IM's deployments from the dashboard.
+#
+# Non-secret config is in vars/config.yaml (im.*); secrets in vars/secrets.yaml
+# (im_secrets.*). Gated on im.enabled — set it false in config.yaml to skip.
+
+- name: Load IM secrets
+  ansible.builtin.include_vars:
+      file: "{{ playbook_dir }}/../vars/secrets.yaml"
+  no_log: true
+  when: im.enabled | bool
+
+- name: Add GRyCAP Helm repository
+  ansible.builtin.shell: |
+      helm repo list | grep -q '^grycap' || helm repo add grycap https://grycap.github.io/helm-charts/
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: helm_grycap_repo
+  changed_when: "'has been added' in helm_grycap_repo.stdout"
+  failed_when: helm_grycap_repo.rc != 0
+  when: im.enabled | bool
+
+- name: Update Helm repositories
+  ansible.builtin.command: helm repo update
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  changed_when: false
+  when: im.enabled | bool
+
+- name: Create IM namespace
+  ansible.builtin.shell: |
+      kubectl create namespace im --dry-run=client -o yaml | kubectl apply -f -
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: im_namespace
+  changed_when: "'created' in im_namespace.stdout"
+  when: im.enabled | bool
+
+# The chart exposes both the IM API (/im) and the dashboard (/im-dashboard) on the
+# same host via traefik Ingress. We disable the chart's default Gateway API route
+# (httproute) since this cluster uses classic Ingress. The OIDC client_secret and
+# credentials_key come from im_secrets; mysql is left at the chart default (an
+# internal-only DB, never exposed) to avoid mis-wiring its Bitnami subchart.
+- name: Create IM Helm values file
+  ansible.builtin.copy:
+      content: |
+          im:
+            ingress:
+              enabled: true
+              type: traefik
+              host: {{ im.ingress_host }}
+              path: /im
+            httproute:
+              enabled: false
+            log:
+              persistence:
+                enabled: true
+          imdashboard:
+            deploy: true
+            ingress:
+              enabled: true
+              type: traefik
+              host: {{ im.ingress_host }}
+              path: /im-dashboard
+            httproute:
+              enabled: false
+            oidc:
+              name: "{{ im.oidc.name }}"
+              base_url: "{{ im.oidc.base_url }}"
+              client_id: "{{ im.oidc.client_id }}"
+              client_secret: "{{ im_secrets.oidc_client_secret }}"
+              group_membership: '{{ im.oidc.group_membership }}'
+              scopes: "{{ im.oidc.scopes }}"
+            credentials_key: "{{ im_secrets.credentials_key }}"
+            support_email: "{{ im.support_email }}"
+          mysql:
+            enabled: true
+            persistence:
+              enabled: true
+      dest: /tmp/im-values.yaml
+      mode: "0600"
+  no_log: true
+  when: im.enabled | bool
+
+- name: Install IM via Helm
+  ansible.builtin.shell: |
+      helm upgrade --install im grycap/IM \
+        --namespace im \
+        --version {{ versions.im }} \
+        --values /tmp/im-values.yaml
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: im_install
+  changed_when: "'has been upgraded' in im_install.stdout or 'has been installed' in im_install.stdout"
+  when: im.enabled | bool
+
+# The chart names the API Deployment "im-backend" and the dashboard "im-dashboard".
+- name: Wait for IM backend to be ready
+  ansible.builtin.command: >-
+      kubectl wait --for=condition=available --timeout=300s
+      deployment/im-backend -n im
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  changed_when: false
+  when: im.enabled | bool
+
+- name: Display IM access info
+  ansible.builtin.debug:
+      msg:
+          - "{{ 'IM installed (chart ' ~ versions.im ~ ').' if im.enabled | bool else 'IM skipped (im.enabled = false).' }}"
+          - "API:       http://{{ im.ingress_host }}/im"
+          - "Dashboard: http://{{ im.ingress_host }}/im-dashboard  (Keycloak login: {{ im.oidc.client_id }})"
+          - "To deploy TO this cluster, add a Kubernetes credential in the dashboard:"
+          - "  host=https://{{ ansible_default_ipv4.address | default('<master-ip>') }}:6443  token=<serviceaccount token>"
+  when: im.enabled | bool

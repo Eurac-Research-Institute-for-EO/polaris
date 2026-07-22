@@ -53,6 +53,8 @@
         ansible.builtin.include_tasks: ../tasks/master/secrets.yaml
       - name: Create ArgoCD project and app-of-apps
         ansible.builtin.include_tasks: ../tasks/master/argocd/project.yaml
+      #- name: Install Infrastructure Manager (IM)
+      #ansible.builtin.include_tasks: ../tasks/master/im.yaml
 
 - name: Join K3s agents on the worker nodes
   hosts: workers
