@@ -76,6 +76,8 @@
             state: absent
         loop:
             - /tmp/argocd-values.yaml
+            - /tmp/argocd-image-updater-values.yaml
+            - /tmp/im-values.yaml
             - /tmp/argocd-appproject.yaml
             - /tmp/argocd-application.yaml
 

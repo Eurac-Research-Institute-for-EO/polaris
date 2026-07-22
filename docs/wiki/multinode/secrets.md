@@ -58,6 +58,10 @@ Every block is **optional**. Drop a section to skip creating its secrets — e.g
 
 `KC_DB_URL` is assembled from the keycloak block as `jdbc:postgresql://<db_host>:<db_port>/<db_name>`.
 
+## ArgoCD Image Updater SSH key (optional)
+
+`secrets.yaml` also holds an optional top-level `image_updater_git_ssh_key` — the SSH deploy key ArgoCD Image Updater uses to push image-tag bumps back to the `polaris-apps` repo. It is created as the Secret `argocd/polaris-apps-image-updater` and is skipped while empty. Generating the key and registering the GitHub deploy key is covered in **[ArgoCD Image Updater](image-updater.md)**.
+
 ## Why plain Secrets, not Sealed Secrets?
 
 This setup deliberately uses **plain** Kubernetes Secrets applied by Ansible, rather than the Sealed Secrets controller. The reasoning:

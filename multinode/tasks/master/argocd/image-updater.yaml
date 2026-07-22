@@ -1,0 +1,101 @@
+# Install ArgoCD Image Updater via Helm (argo-helm chart).
+#
+# Image Updater watches the registries behind your container images and, for any
+# ArgoCD Application carrying `argocd-image-updater.argoproj.io/*` annotations,
+# bumps the tracked image tag when a newer one appears. It is ArgoCD platform
+# infra, so we install it here (alongside ArgoCD) rather than as an app in the
+# polaris-apps repo, and pin the chart version in vars/config.yaml (versions.
+# argocd_image_updater) exactly like argocd/k3s/helm.
+#
+# Mode: in this version (chart 1.2.4 / appVersion v1.2.2) it runs as a controller-runtime controller
+# that ALWAYS reads and PATCHES the Application CRs directly via the k8s API (the
+# chart grants the ServiceAccount that RBAC). That needs no argocd-server API token
+# and no extra Secret — nothing to add to vars/secrets.yaml. Registry credentials
+# are only needed for PRIVATE registries (config.registries); public ones (ghcr.io,
+# quay.io, docker.io) work anonymously.
+#
+# DNS: the updater queries external registries, so it would hit the same
+# unibz.it wildcard 0.0.0.0 trap as the rest of ArgoCD. The chart's deployment
+# template exposes no dnsConfig, so we rely on the cluster-wide pod DNS fix in
+# tasks/common/dns.yaml (empty search domains) rather than a per-component
+# ndots:1 override like argocd/install.yaml uses.
+#
+# Gated on argocd.image_updater.enabled — set it false in config.yaml to skip.
+
+- name: Add ArgoCD Helm repository
+  ansible.builtin.shell: |
+      helm repo list | grep -q '^argo' || helm repo add argo https://argoproj.github.io/argo-helm
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: helm_argo_repo_iu
+  changed_when: "'has been added' in helm_argo_repo_iu.stdout"
+  failed_when: helm_argo_repo_iu.rc != 0
+  when: argocd.image_updater.enabled | bool
+
+- name: Update Helm repositories
+  ansible.builtin.command: helm repo update
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  changed_when: false
+  when: argocd.image_updater.enabled | bool
+
+- name: Create ArgoCD Image Updater Helm values file
+  ansible.builtin.copy:
+      content: |
+          # This chart (appVersion v1.2.2) runs Image Updater as a controller-runtime
+          # controller that ALWAYS reads/patches the Application CRs via the k8s
+          # API natively — there is no argocd-vs-kubernetes applications-api switch
+          # anymore. The chart's RBAC already grants the
+          # ServiceAccount get/list/watch/update/patch on applications.
+          config:
+            log.level: "{{ argocd.image_updater.log_level }}"
+            # Author for git write-back commits (openeo dev app pushes tag bumps
+            # to polaris-apps). Identity only — auth is the per-app SSH deploy key
+            # secret argocd/polaris-apps-image-updater (created in secrets.yaml).
+            git.user: "argocd-image-updater"
+            git.email: "image-updater@polaris.eurac.edu"
+            # Private registry endpoints + credentials go here when needed, e.g.:
+            #   registries:
+            #     - name: GHCR
+            #       api_url: https://ghcr.io
+            #       prefix: ghcr.io
+            #       credentials: pullsecret:argocd/ghcr-creds
+            registries: []
+      dest: /tmp/argocd-image-updater-values.yaml
+      mode: "0644"
+  when: argocd.image_updater.enabled | bool
+
+- name: Install ArgoCD Image Updater via Helm
+  ansible.builtin.shell: |
+      helm upgrade --install argocd-image-updater argo/argocd-image-updater \
+        --namespace argocd \
+        --version {{ versions.argocd_image_updater }} \
+        --values /tmp/argocd-image-updater-values.yaml
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  register: argocd_image_updater_install
+  changed_when: >-
+      'has been upgraded' in argocd_image_updater_install.stdout
+      or 'has been installed' in argocd_image_updater_install.stdout
+  when: argocd.image_updater.enabled | bool
+
+# The chart names the Deployment <release>-controller. With release
+# "argocd-image-updater" (which contains the chart name), the fullname collapses
+# to "argocd-image-updater", so the Deployment is "argocd-image-updater-controller".
+- name: Wait for ArgoCD Image Updater to be ready
+  ansible.builtin.command: >-
+      kubectl wait --for=condition=available --timeout=180s
+      deployment/argocd-image-updater-controller -n argocd
+  environment:
+      KUBECONFIG: "{{ kubeconfig_path }}"
+  changed_when: false
+  when: argocd.image_updater.enabled | bool
+
+- name: Display ArgoCD Image Updater status
+  ansible.builtin.debug:
+      msg: >-
+          {{ 'ArgoCD Image Updater ' ~ versions.argocd_image_updater ~
+          ' installed (argocd ns, kubernetes API mode). Annotate Applications with
+          argocd-image-updater.argoproj.io/* to opt them in.'
+          if argocd.image_updater.enabled | bool
+          else 'ArgoCD Image Updater skipped (argocd.image_updater.enabled = false).' }}

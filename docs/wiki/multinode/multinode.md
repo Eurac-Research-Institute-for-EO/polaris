@@ -16,7 +16,9 @@ Work through the chapters in order — each ends with a pointer to the next:
 4. **[Secrets](secrets.md)** — create `vars/secrets.yaml` (OIDC + application secrets).
 5. **[Deploy & Verify](deployment.md)** — run `playbooks/deploy.yaml` and confirm the cluster.
 6. **[Operations](operations.md)** — add workers later, or tear down and start over.
-7. **[Troubleshooting](troubleshooting.md)** — DNS, joins, and other common issues.
+7. **[ArgoCD Image Updater](image-updater.md)** — auto-update image tags with git write-back (optional).
+8. **[Infrastructure Manager (IM)](im.md)** — TOSCA-based app deployment with a dashboard (optional).
+9. **[Troubleshooting](troubleshooting.md)** — DNS, joins, and other common issues.
 
 ## Directory layout
 
@@ -42,11 +44,13 @@ multinode/
     │   ├── k3s-server.yaml    ← K3s server + join token
     │   ├── coredns.yaml       ← CoreDNS upstream resolvers
     │   ├── helm.yaml          ← Helm binary
-    │   ├── secrets.yaml       ← application Secrets (grafana, keycloak, openeo)
+    │   ├── secrets.yaml       ← application Secrets (grafana, keycloak, openeo, image-updater key)
+    │   ├── im.yaml            ← Infrastructure Manager (IM) via Helm
     │   └── argocd/
-    │       ├── install.yaml   ← ArgoCD via Helm (ingress + OIDC config)
-    │       ├── oidc.yaml      ← patch Keycloak client secret, restart
-    │       └── project.yaml   ← AppProject + app-of-apps
+    │       ├── install.yaml       ← ArgoCD via Helm (ingress + OIDC config)
+    │       ├── oidc.yaml          ← patch Keycloak client secret, restart
+    │       ├── image-updater.yaml ← ArgoCD Image Updater via Helm
+    │       └── project.yaml       ← AppProject + app-of-apps
     └── worker/
         └── k3s-agent.yaml     ← K3s agent join
 ```
